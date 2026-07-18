@@ -8,17 +8,20 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY azure_secret_watch ./azure_secret_watch
+COPY docker-entrypoint.sh /usr/local/bin/
 
 RUN useradd --create-home --uid 10001 watcher \
     && mkdir -p /data \
-    && chown -R watcher:watcher /app /data
+    && chown -R watcher:watcher /app /data \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER watcher
-
+# Stay root at container start: docker-entrypoint.sh fixes up ownership of
+# bind-mounted volumes (which land here owned by whatever the host side is,
+# not "watcher") before dropping to the unprivileged user to actually run.
 VOLUME ["/data"]
 EXPOSE 8080
 
 HEALTHCHECK --interval=5m --timeout=5s --start-period=30s --retries=3 \
     CMD python -m azure_secret_watch.healthcheck || exit 1
 
-ENTRYPOINT ["python", "-m", "azure_secret_watch"]
+ENTRYPOINT ["docker-entrypoint.sh"]

@@ -1,0 +1,16 @@
+services:
+  azure-secret-watch:
+    build: .
+    container_name: azure-secret-watch-once
+    # Use this compose file if you'd rather trigger scans from an external
+    # scheduler (host cron, systemd timer, Kubernetes CronJob) instead of the
+    # built-in loop, e.g.:
+    #   docker compose -f docker-compose.once.yml run --rm azure-secret-watch
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      - RUN_MODE=once
+    volumes:
+      - ./data:/data
+      - ./certs:/certs:ro

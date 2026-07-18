@@ -1,0 +1,580 @@
+{% extends "base.html" %}
+{% block title %}azure-secret-watch{% endblock %}
+{% block extra_style %}
+  .page-head-row {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  .page-head-row .page-head { margin-bottom: 0; }
+  .page-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 3px; }
+  .page-head-actions #scan-status { font-size: 12.5px; color: var(--text-secondary); }
+  .stats {
+    display: flex; flex-wrap: wrap;
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-xs); overflow: hidden; margin-bottom: 26px;
+  }
+  .stat {
+    flex: 1 1 170px; padding: 18px 22px;
+    box-shadow: -1px 0 0 var(--border), 0 -1px 0 var(--border);
+  }
+  .stat .num { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; font-variant-numeric: tabular-nums; }
+  .stat .label { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
+  .stat .sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+  .stat.expired .num { color: var(--danger-text); }
+  .stat.warning .num { color: var(--warning-text); }
+  .stat.ok .num { color: var(--success-text); }
+  .stat[data-filter] { cursor: pointer; transition: background .1s ease; }
+  .stat[data-filter]:hover { background: var(--bg-surface-alt); }
+
+  .attn-card { margin-bottom: 22px; overflow: hidden; }
+  .attn-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+  }
+  .attn-head h2 { font-size: 14px; font-weight: 650; margin: 0; display: flex; align-items: center; gap: 8px; }
+  .attn-head h2 .attn-dot { width: 9px; height: 9px; }
+  .attn-head .attn-count { font-size: 12px; color: var(--text-muted); }
+  .attn-body { max-height: 360px; overflow-y: auto; }
+  .attn-row { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
+  .attn-row:last-child { border-bottom: none; }
+  .attn-row:hover { background: var(--bg-page); }
+  .attn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .attn-dot.expired { background: var(--danger); }
+  .attn-dot.warning { background: var(--warning); }
+  .attn-main { flex: 1; min-width: 0; }
+  .attn-title {
+    font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .attn-title .attn-cred { font-weight: 400; color: var(--text-secondary); }
+  .attn-sub {
+    font-size: 12px; color: var(--text-muted); margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .attn-no-owner { font-style: italic; }
+  .attn-when { font-size: 12.5px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+  .attn-when.expired { color: var(--danger-text); }
+  .attn-when.warning { color: var(--warning-text); }
+  .attn-actions { display: flex; align-items: center; flex-shrink: 0; }
+  .attn-empty { padding: 24px 18px; text-align: center; color: var(--text-muted); font-size: 13.5px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .search-box { position: relative; }
+  .search-box .icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); width: 14px; height: 14px; }
+  input[type="search"] { padding-left: 33px; min-width: 240px; }
+
+  .table-wrap {
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-xs); overflow-x: auto;
+  }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { text-align: left; padding: 12px 16px; font-size: 13.5px; }
+  thead th {
+    color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .05em; border-bottom: 1px solid var(--border);
+    background: transparent; white-space: nowrap; padding-top: 13px; padding-bottom: 11px;
+  }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text-primary); }
+  th .sort-arrow { display: inline-block; width: 10px; opacity: 0.35; font-size: 9px; }
+  th.sorted .sort-arrow { opacity: 1; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s ease; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--bg-page); }
+  th.col-status, td.status-cell { width: 96px; }
+  th.col-type, td.type-cell { width: 90px; }
+  th.col-expires, td.expires-cell { width: 118px; }
+  th.col-days, td.days-cell { width: 132px; }
+  th.col-actions, td.actions-cell { width: 76px; }
+  th.col-app, td.app-cell { width: 24%; }
+  th.col-cred, td.cred-cell { width: 16%; }
+  th.col-owners, td.owners-cell { width: 15%; }
+  td.app-cell { font-weight: 550; }
+  td.cred-cell, td.type-cell { color: var(--text-secondary); }
+  td.expires-cell, td.days-cell {
+    font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap;
+  }
+  td.actions-cell { white-space: nowrap; }
+  td.truncate, th.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 550; text-transform: capitalize; }
+  .badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .badge.expired { color: var(--danger-text); }
+  .badge.warning { color: var(--warning-text); }
+  .badge.ok { color: var(--success-text); }
+
+  .icon-action {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 6px; border: none; background: transparent;
+    color: var(--text-muted); cursor: pointer; margin-left: 2px;
+  }
+  .icon-action:hover { background: var(--bg-surface-alt); color: var(--text-primary); }
+
+  .empty { padding: 56px 0; text-align: center; color: var(--text-muted); }
+
+  .pagination {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 11px 16px; border-top: 1px solid var(--border);
+    font-size: 12.5px; color: var(--text-muted); flex-wrap: wrap;
+  }
+  .pagination .btn { padding: 5px 11px; font-size: 12.5px; }
+  .pagination .pages { display: flex; gap: 6px; align-items: center; }
+
+  details.history { margin-top: 26px; }
+  details.history summary {
+    cursor: pointer; font-weight: 600; font-size: 13px; color: var(--text-secondary);
+    padding: 8px 2px; list-style: none; display: flex; align-items: center; gap: 6px;
+  }
+  details.history summary:hover { color: var(--text-primary); }
+  details.history summary::-webkit-details-marker { display: none; }
+  details.history summary .chev { transition: transform .15s ease; width: 14px; height: 14px; }
+  details.history[open] summary .chev { transform: rotate(180deg); }
+  .history-table-wrap {
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-xs); overflow: hidden; margin-top: 8px;
+  }
+  .history-table-wrap table { font-size: 12.5px; }
+  .history-table-wrap th, .history-table-wrap td { padding: 10px 16px; }
+  .status-text.ok { color: var(--success-text); font-weight: 600; }
+  .status-text.error { color: var(--danger-text); font-weight: 600; }
+  .detail-cell { color: var(--text-muted); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+{% endblock %}
+{% block content %}
+  <div class="page-head-row">
+    <div class="page-head">
+      <h1>{{ 'All credentials' if view_all else 'Applications' }}</h1>
+      <p>
+        {% if view_all %}
+          Every App Registration credential azure-secret-watch has seen, with expiry status.
+        {% else %}
+          Credentials that are expired or expiring soon, sorted by urgency.
+        {% endif %}
+      </p>
+    </div>
+    <div class="page-head-actions">
+      <span id="scan-status">{% if scanning %}Scanning…{% endif %}</span>
+      <button class="btn primary" id="scan-now" type="button" {% if scanning %}disabled{% endif %}>
+        <svg class="icon" id="scan-icon"><use href="#i-bolt"/></svg>Scan now
+      </button>
+    </div>
+  </div>
+
+  <div class="meta">
+    {% if generated_at %}Last scan {{ generated_at[:19].replace('T', ' ') }} UTC{% else %}No scan has completed yet{% endif %}
+    {% if next_scan_at %}<span class="sep">·</span>Next scheduled scan {{ next_scan_at[:19].replace('T', ' ') }} UTC{% endif %}
+  </div>
+
+  {% if status.get('status') == 'error' %}
+  <div class="error-banner">
+    <svg class="icon" style="margin-top:1px"><use href="#i-alert"/></svg>
+    <div><strong>Last run failed:</strong> {{ status.get('detail') }}</div>
+  </div>
+  {% endif %}
+
+  <div class="chip-row">
+    <span class="chip {{ 'on' if notifiers.email else 'off' }}"><span class="dot"></span>Email</span>
+    <span class="chip {{ 'on' if notifiers.teams else 'off' }}"><span class="dot"></span>Teams</span>
+    <span class="chip {{ 'on' if notifiers.webhook else 'off' }}"><span class="dot"></span>Webhook</span>
+    <span class="chip">Warning thresholds: {{ thresholds|map('string')|join(' / ') }} days</span>
+    {% if owners_enabled %}
+      {% if summary.unowned_apps > 0 %}
+      <span class="chip warn"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>{{ summary.unowned_apps }} app(s) have no owner in Entra ID</span>
+      {% endif %}
+    {% else %}
+    <span class="chip off" title="Set NOTIFY_OWNERS=true and grant the User.Read.All permission to show each app's owner">Owner lookup disabled</span>
+    {% endif %}
+    {% if not auth_enabled %}
+    <span class="chip warn"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>Dashboard has no authentication enabled</span>
+    {% endif %}
+  </div>
+
+  <div class="stats">
+    <div class="stat" data-filter="">
+      <div class="num">{{ summary.total_apps }}</div>
+      <div class="label">Applications</div>
+    </div>
+    <div class="stat" data-filter="">
+      <div class="num">{{ summary.total_credentials }}</div>
+      <div class="label">Total credentials</div>
+      <div class="sub">{{ summary.secrets }} secrets · {{ summary.certificates }} certificates</div>
+    </div>
+    <div class="stat expired" data-filter="expired">
+      <div class="num">{{ summary.expired }}</div>
+      <div class="label">Expired</div>
+    </div>
+    <div class="stat warning" data-filter="warning">
+      <div class="num">{{ summary.warning }}</div>
+      <div class="label">Expiring soon</div>
+    </div>
+    <div class="stat ok" data-filter="ok">
+      <div class="num">{{ summary.ok }}</div>
+      <div class="label">Healthy</div>
+    </div>
+  </div>
+
+  {% macro attention_card(title, status_value, count, empty_text) %}
+  <div class="card-surface attn-card">
+    <div class="attn-head">
+      <h2><span class="attn-dot {{ status_value }}"></span>{{ title }}</h2>
+      <span class="attn-count">{{ count }} credential(s) </span>
+    </div>
+    {% set rows = credentials | selectattr('status', 'equalto', status_value) | list %}
+    {% if rows %}
+    <div class="attn-body">
+      {% for c in rows %}
+      <div class="attn-row">
+        <div class="attn-main">
+          <div class="attn-title">{{ c.app_display_name }} <span class="attn-cred">— {{ c.display_name }}</span></div>
+          <div class="attn-sub">
+            {{ 'Certificate' if c.credential_type == 'certificate' else 'Secret' }} · expires {{ c.end_datetime[:10] }}
+            {%- if owners_enabled %} · {% if c.owners %}{{ c.owners | join(', ') }}{% else %}<span class="attn-no-owner">no owner</span>{% endif %}{% endif %}
+          </div>
+        </div>
+        <div class="attn-when {{ c.status }}">{% if c.is_expired %}{{ -c.days_until_expiry }} days ago{% else %}in {{ c.days_until_expiry }} days{% endif %}</div>
+        <div class="attn-actions">
+          <a class="icon-action" href="{{ c.portal_url }}" target="_blank" rel="noopener" title="View in Azure portal" aria-label="View in Azure portal">
+            <svg class="icon" style="width:14px;height:14px"><use href="#i-external"/></svg>
+          </a>
+          <button class="icon-action copy-app-id" data-app-id="{{ c.app_id }}" title="Copy App ID" aria-label="Copy App ID">
+            <svg class="icon" style="width:14px;height:14px"><use href="#i-clip"/></svg>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="attn-empty">{{ empty_text }}</div>
+    {% endif %}
+  </div>
+  {% endmacro %}
+
+  {% if not view_all %}
+  {{ attention_card('Expired', 'expired', summary.expired, 'No expired credentials.') }}
+  {{ attention_card('Expiring soon', 'warning', summary.warning, 'Nothing expiring soon.') }}
+  {% endif %}
+
+  <div id="full-list-section" {% if not view_all %}style="display:none;"{% endif %}>
+  <div class="toolbar">
+    <div class="filters">
+      <div class="search-box">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input id="search" type="search" placeholder="Search application / credential...">
+      </div>
+      <select id="status-filter">
+        <option value="" {% if not status_filter %}selected{% endif %}>All statuses</option>
+        <option value="expired" {% if status_filter == 'expired' %}selected{% endif %}>Expired</option>
+        <option value="warning" {% if status_filter == 'warning' %}selected{% endif %}>Expiring soon</option>
+        <option value="ok" {% if status_filter == 'ok' %}selected{% endif %}>OK</option>
+      </select>
+      <select id="page-size">
+        <option value="25">25 per page</option>
+        <option value="50">50 per page</option>
+        <option value="100">100 per page</option>
+        <option value="999999">Show all</option>
+      </select>
+    </div>
+    <div>
+      <button class="btn" id="export-csv" type="button">
+        <svg class="icon"><use href="#i-download"/></svg>Export CSV
+      </button>
+    </div>
+  </div>
+
+  {% if credentials %}
+  <div class="table-wrap">
+    <table id="cred-table">
+      <thead>
+        <tr>
+          <th class="col-status">Status</th>
+          <th class="sortable col-app truncate" data-key="app">Application <span class="sort-arrow">▲</span></th>
+          <th class="sortable col-type" data-key="type">Type <span class="sort-arrow">▲</span></th>
+          <th class="sortable col-cred truncate" data-key="cred">Credential <span class="sort-arrow">▲</span></th>
+          <th class="sortable col-expires" data-key="expires">Expires on <span class="sort-arrow">▲</span></th>
+          <th class="sortable sorted col-days" data-key="days">Days left <span class="sort-arrow">▲</span></th>
+          {% if owners_enabled %}<th class="col-owners truncate">Owners</th>{% endif %}
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in credentials %}
+        {% set owners_text = (c.owners or []) | join(', ') %}
+        <tr data-status="{{ c.status }}"
+            data-search="{{ (c.app_display_name ~ ' ' ~ c.display_name ~ ' ' ~ owners_text) | lower }}"
+            data-app="{{ c.app_display_name | lower }}"
+            data-type="{{ c.credential_type }}"
+            data-cred="{{ c.display_name | lower }}"
+            data-expires="{{ c.end_datetime[:10] }}"
+            data-days="{{ c.days_until_expiry }}"
+            data-owners="{{ (c.owners or []) | join('; ') }}">
+          <td class="status-cell"><span class="badge {{ c.status }}">{{ c.status }}</span></td>
+          <td class="app-cell truncate" title="{{ c.app_display_name }}">{{ c.app_display_name }}</td>
+          <td class="type-cell">{{ 'Certificate' if c.credential_type == 'certificate' else 'Secret' }}</td>
+          <td class="cred-cell truncate" title="{{ c.display_name }}">{{ c.display_name }}</td>
+          <td class="expires-cell">{{ c.end_datetime[:10] }}</td>
+          <td class="days-cell">{% if c.is_expired %}{{ -c.days_until_expiry }} days ago{% else %}in {{ c.days_until_expiry }} days{% endif %}</td>
+          {% if owners_enabled %}
+          <td class="owners-cell truncate" title="{{ owners_text }}">
+            {% if c.owners %}{{ owners_text }}{% else %}<span style="color:var(--text-muted)">No owner</span>{% endif %}
+          </td>
+          {% endif %}
+          <td class="actions-cell">
+            <a class="icon-action" href="{{ c.portal_url }}" target="_blank" rel="noopener" title="View in Azure portal" aria-label="View in Azure portal">
+              <svg class="icon" style="width:14px;height:14px"><use href="#i-external"/></svg>
+            </a>
+            <button class="icon-action copy-app-id" data-app-id="{{ c.app_id }}" title="Copy App ID" aria-label="Copy App ID">
+              <svg class="icon" style="width:14px;height:14px"><use href="#i-clip"/></svg>
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="pagination">
+      <span id="page-info"></span>
+      <div class="pages">
+        <button class="btn" id="prev-page" type="button">Previous</button>
+        <button class="btn" id="next-page" type="button">Next</button>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="table-wrap"><div class="empty">No scan data yet — click "Scan now" or wait for the next scheduled scan.</div></div>
+  {% endif %}
+  </div>
+
+  {% if history %}
+  <details class="history">
+    <summary><svg class="icon chev"><use href="#i-chevron"/></svg>Scan history (past 24h — {{ history|length }} run(s))</summary>
+    <div class="history-table-wrap">
+      <table>
+        <thead>
+          <tr><th>Time (UTC)</th><th>Status</th><th>Apps</th><th>Credentials</th><th>Alerts</th><th>Detail</th></tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+          <tr>
+            <td>{{ h.ran_at[:19].replace('T', ' ') }}</td>
+            <td><span class="status-text {{ 'ok' if h.status == 'ok' else 'error' }}">{{ h.status }}</span></td>
+            <td>{{ h.app_count }}</td>
+            <td>{{ h.credential_count }}</td>
+            <td>{{ h.alert_count }}</td>
+            <td class="detail-cell" title="{{ h.detail }}">{{ h.detail }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
+  <footer>
+    <span>Read-only dashboard: shows credential metadata (expiry dates, etc.) only — it never displays or has access to actual secret or certificate values.</span>
+    <span>azure-secret-watch</span>
+  </footer>
+{% endblock %}
+{% block scripts %}
+(function () {
+  document.querySelectorAll('.stat[data-filter]').forEach(function (tile) {
+    tile.addEventListener('click', function () {
+      var f = tile.dataset.filter;
+      window.location.href = f ? ('/?view=all&status=' + encodeURIComponent(f)) : '/?view=all';
+    });
+  });
+})();
+
+(function () {
+  var table = document.getElementById('cred-table');
+  if (!table) return;
+
+  var tbody = table.querySelector('tbody');
+  var search = document.getElementById('search');
+  var statusFilter = document.getElementById('status-filter');
+  var pageSizeSelect = document.getElementById('page-size');
+  var prevBtn = document.getElementById('prev-page');
+  var nextBtn = document.getElementById('next-page');
+  var pageInfo = document.getElementById('page-info');
+
+  var sortKey = 'days';
+  var sortDir = 'asc';
+  var page = 1;
+
+  function currentRows() { return Array.from(tbody.children); }
+
+  function compareVal(row, key) {
+    if (key === 'days') return parseFloat(row.dataset.days);
+    return row.dataset[key] || '';
+  }
+
+  function sortRows() {
+    var rows = currentRows();
+    rows.sort(function (a, b) {
+      var av = compareVal(a, sortKey), bv = compareVal(b, sortKey);
+      var cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    rows.forEach(function (r) { tbody.appendChild(r); });
+  }
+
+  table.querySelectorAll('th.sortable').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var key = th.dataset.key;
+      if (sortKey === key) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortKey = key;
+        sortDir = 'asc';
+      }
+      table.querySelectorAll('th.sortable').forEach(function (h) {
+        h.classList.remove('sorted');
+        h.querySelector('.sort-arrow').textContent = '▲';
+      });
+      th.classList.add('sorted');
+      th.querySelector('.sort-arrow').textContent = sortDir === 'asc' ? '▲' : '▼';
+      sortRows();
+      page = 1;
+      render();
+    });
+  });
+
+  function matches(row) {
+    var q = search.value.trim().toLowerCase();
+    var st = statusFilter.value;
+    var matchesSearch = !q || row.dataset.search.indexOf(q) !== -1;
+    var matchesStatus = !st || row.dataset.status === st;
+    return matchesSearch && matchesStatus;
+  }
+
+  function render() {
+    var rows = currentRows();
+    var matched = rows.filter(matches);
+    var pageSize = parseInt(pageSizeSelect.value, 10);
+    var totalPages = Math.max(1, Math.ceil(matched.length / pageSize));
+    if (page > totalPages) page = totalPages;
+    var start = (page - 1) * pageSize;
+    var pageSet = new Set(matched.slice(start, start + pageSize));
+
+    rows.forEach(function (r) { r.style.display = 'none'; });
+    matched.forEach(function (r) { if (pageSet.has(r)) r.style.display = ''; });
+
+    if (matched.length === 0) {
+      pageInfo.textContent = 'No credentials match the filters';
+    } else {
+      var last = Math.min(start + pageSize, matched.length);
+      pageInfo.textContent = 'Showing ' + (start + 1) + '–' + last + ' of ' + matched.length +
+        (matched.length !== rows.length ? ' (' + rows.length + ' total)' : '');
+    }
+    prevBtn.disabled = page <= 1;
+    nextBtn.disabled = page >= totalPages;
+  }
+
+  search.addEventListener('input', function () { page = 1; render(); });
+  statusFilter.addEventListener('change', function () { page = 1; render(); });
+  pageSizeSelect.addEventListener('change', function () { page = 1; render(); });
+  prevBtn.addEventListener('click', function () { if (page > 1) { page--; render(); } });
+  nextBtn.addEventListener('click', function () { page++; render(); });
+
+  sortRows();
+  render();
+
+  document.getElementById('export-csv').addEventListener('click', function () {
+    var ownersEnabled = {{ owners_enabled | tojson }};
+    var header = ['status', 'application', 'type', 'credential', 'expires_on', 'days_until_expiry'];
+    if (ownersEnabled) header.push('owners');
+    var lines = [header.join(',')];
+    currentRows().filter(matches).forEach(function (r) {
+      var cells = r.querySelectorAll('td');
+      var raw = [
+        r.dataset.status,
+        cells[1].textContent.trim(),
+        cells[2].textContent.trim(),
+        cells[3].textContent.trim(),
+        r.dataset.expires,
+        r.dataset.days
+      ];
+      if (ownersEnabled) raw.push(r.dataset.owners);
+      var values = raw.map(function (v) {
+        v = String(v).replace(/"/g, '""');
+        return /[",\n]/.test(v) ? '"' + v + '"' : v;
+      });
+      lines.push(values.join(','));
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'azure-secret-watch-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  document.querySelectorAll('.copy-app-id').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      navigator.clipboard.writeText(btn.dataset.appId).then(function () {
+        btn.title = 'Copied';
+        setTimeout(function () { btn.title = 'Copy App ID'; }, 1200);
+      });
+    });
+  });
+})();
+
+(function () {
+  var scanButton = document.getElementById('scan-now');
+  var scanStatus = document.getElementById('scan-status');
+  var scanIconUse = document.querySelector('#scan-icon use');
+  scanButton.addEventListener('click', function () {
+    scanButton.disabled = true;
+    scanIconUse.setAttribute('href', '#i-refresh');
+    document.getElementById('scan-icon').classList.add('spin');
+    scanStatus.textContent = 'Scanning…';
+    fetch('/api/scan', { method: 'POST' }).then(function (res) {
+      if (res.status === 202) {
+        pollUntilDone();
+      } else {
+        return res.json().then(function (body) {
+          scanStatus.textContent = body.detail || 'Failed to start';
+          scanButton.disabled = false;
+        });
+      }
+    }).catch(function (e) {
+      scanStatus.textContent = 'Failed to start: ' + e;
+      scanButton.disabled = false;
+    });
+  });
+
+  var initialRanAt = {{ (status.get('ran_at') or '') | tojson }};
+  var reloadScheduled = false;
+
+  function newDataAvailable() {
+    if (reloadScheduled) return;
+    reloadScheduled = true;
+    window.location.reload();
+  }
+
+  function pollUntilDone() {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries++;
+      fetch('/api/status').then(function (r) { return r.json(); }).then(function (data) {
+        if (!data.scanning) {
+          clearInterval(timer);
+          scanButton.disabled = false;
+          scanStatus.textContent = '';
+          if (data.last_run && data.last_run.ran_at !== initialRanAt) {
+            newDataAvailable();
+          }
+        }
+        if (tries > 60) clearInterval(timer);
+      }).catch(function () { clearInterval(timer); scanButton.disabled = false; });
+    }, 2000);
+  }
+
+  setInterval(function () {
+    fetch('/api/status').then(function (r) { return r.json(); }).then(function (data) {
+      if (!data.scanning && data.last_run && data.last_run.ran_at && data.last_run.ran_at !== initialRanAt) {
+        newDataAvailable();
+      }
+    }).catch(function () {});
+  }, 30000);
+})();
+{% endblock %}

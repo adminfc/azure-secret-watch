@@ -1,0 +1,6 @@
+azure-identity>=1.17,<2
+requests>=2.31,<3
+python-dotenv>=1.0,<2
+croniter>=2.0,<4
+Flask>=3.0,<4
+waitress>=3.0,<4

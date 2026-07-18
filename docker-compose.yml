@@ -1,0 +1,25 @@
+services:
+  azure-secret-watch:
+    build: .
+    # Once you publish an image, you can swap the line above for e.g.:
+    # image: ghcr.io/<your-org>/azure-secret-watch:latest
+    container_name: azure-secret-watch
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Web dashboard. If you change WEB_UI_PORT in .env, both sides follow
+      # automatically. Set WEB_UI_ENABLED=false in .env to disable it entirely.
+      - "${WEB_UI_PORT:-8080}:${WEB_UI_PORT:-8080}"
+    volumes:
+      # Persists the notification dedupe state and last-run status across restarts.
+      - ./data:/data
+      # Only needed if you authenticate with a client certificate instead of a
+      # client secret (AZURE_CLIENT_CERTIFICATE_PATH). Mount read-only.
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "python", "-m", "azure_secret_watch.healthcheck"]
+      interval: 5m
+      timeout: 5s
+      start_period: 30s
+      retries: 3

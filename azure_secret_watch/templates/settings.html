@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Monitoring · azure-secret-watch{% endblock %}
+{% block extra_style %}
+  .settings-card { margin-bottom: 20px; overflow: hidden; }
+  .settings-status {
+    display: flex; align-items: center; gap: 10px; padding: 16px 22px;
+    border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13.5px;
+  }
+  .settings-status .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+    box-shadow: 0 0 0 4px var(--success-bg); flex-shrink: 0;
+  }
+  .settings-status.off .dot { background: var(--text-muted); box-shadow: 0 0 0 4px var(--bg-surface-alt); }
+
+  .channel-row {
+    display: flex; align-items: center; gap: 15px; padding: 17px 22px;
+    border-bottom: 1px solid var(--border);
+  }
+  .channel-icon {
+    width: 34px; height: 34px; border-radius: 9px; background: var(--bg-surface-alt);
+    color: var(--text-secondary); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .channel-icon.on { background: var(--success-bg); color: var(--success-text); }
+  .channel-icon .icon { width: 16px; height: 16px; }
+  .channel-info { flex: 1; min-width: 0; }
+  .channel-info .title-row { display: flex; align-items: center; gap: 8px; }
+  .channel-info .title { font-weight: 600; font-size: 13.5px; }
+  .channel-info .desc { color: var(--text-secondary); font-size: 12.5px; margin-top: 2px; }
+  .channel-note { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  .field-group { padding: 18px 22px; }
+  .field-group .label { font-weight: 600; font-size: 13.5px; margin-bottom: 2px; }
+  .field-group .hint { color: var(--text-secondary); font-size: 12.5px; margin-bottom: 10px; }
+  .field-group input[type="text"] { width: 100%; max-width: 480px; }
+
+  .test-btn { flex-shrink: 0; white-space: nowrap; }
+  .test-result {
+    font-size: 12px; margin-top: 4px; display: none;
+  }
+  .test-result.ok { color: var(--success-text); display: block; }
+  .test-result.fail { color: var(--danger-text); display: block; }
+
+  .settings-footer {
+    display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+    padding: 13px 22px; border-top: 1px solid var(--border);
+  }
+{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1>Monitoring</h1>
+    <p>Choose how and where azure-secret-watch tells you about expiring credentials.</p>
+  </div>
+  <div class="meta"></div>
+
+  {% if error %}
+  <div class="error-banner">
+    <svg class="icon" style="margin-top:1px"><use href="#i-alert"/></svg>
+    <div>{{ error }}</div>
+  </div>
+  {% endif %}
+  {% if success %}
+  <div class="success-banner">{{ success }}</div>
+  {% endif %}
+
+  <form method="post" action="/settings">
+    <div class="card-surface settings-card">
+      <div class="settings-status {{ '' if (email.enabled or teams.enabled or webhook.enabled) else 'off' }}">
+        <span class="dot"></span>
+        {% if email.enabled or teams.enabled or webhook.enabled %}
+          Monitoring alerts are active
+        {% else %}
+          No notification channel is enabled — alerts are only written to the log
+        {% endif %}
+      </div>
+
+      <div class="channel-row">
+        <span class="channel-icon {{ 'on' if email.enabled else '' }}"><svg class="icon"><use href="#i-mail"/></svg></span>
+        <div class="channel-info">
+          <div class="title-row">
+            <span class="title">Email reports</span>
+            <span class="chip {{ 'on' if email.enabled else 'off' }}">{{ 'Active' if email.enabled else 'Off' }}</span>
+          </div>
+          <div class="desc">One alert per credential, per warning threshold crossed.</div>
+          {% if not email_configured %}
+          <div class="channel-note">Set SMTP_HOST, EMAIL_FROM and EMAIL_TO in the environment before enabling this.</div>
+          {% endif %}
+          <div class="test-result" id="test-result-email"></div>
+        </div>
+        <button type="button" class="btn test-btn" id="test-btn-email" {% if not email_configured %}disabled{% endif %} onclick="sendTestNotification('email')">Send test</button>
+        <label class="toggle">
+          <input type="checkbox" name="notify_email_enabled" {% if email.enabled %}checked{% endif %} {% if not email_configured %}disabled{% endif %}>
+          <span class="track"></span>
+        </label>
+      </div>
+
+      <div class="channel-row">
+        <span class="channel-icon {{ 'on' if teams.enabled else '' }}"><svg class="icon"><use href="#i-bell"/></svg></span>
+        <div class="channel-info">
+          <div class="title-row">
+            <span class="title">Microsoft Teams</span>
+            <span class="chip {{ 'on' if teams.enabled else 'off' }}">{{ 'Active' if teams.enabled else 'Off' }}</span>
+          </div>
+          <div class="desc">Posts the same alerts to a Teams channel via an incoming webhook.</div>
+          {% if not teams_configured %}
+          <div class="channel-note">Set TEAMS_WEBHOOK_URL in the environment before enabling this.</div>
+          {% else %}
+          <div class="channel-note">Webhook URL is configured via the environment and is not shown here.</div>
+          {% endif %}
+          <div class="test-result" id="test-result-teams"></div>
+        </div>
+        <button type="button" class="btn test-btn" id="test-btn-teams" {% if not teams_configured %}disabled{% endif %} onclick="sendTestNotification('teams')">Send test</button>
+        <label class="toggle">
+          <input type="checkbox" name="notify_teams_enabled" {% if teams.enabled %}checked{% endif %} {% if not teams_configured %}disabled{% endif %}>
+          <span class="track"></span>
+        </label>
+      </div>
+
+      <div class="channel-row">
+        <span class="channel-icon {{ 'on' if webhook.enabled else '' }}"><svg class="icon"><use href="#i-code"/></svg></span>
+        <div class="channel-info">
+          <div class="title-row">
+            <span class="title">Custom webhook</span>
+            <span class="chip {{ 'on' if webhook.enabled else 'off' }}">{{ 'Active' if webhook.enabled else 'Off' }}</span>
+          </div>
+          <div class="desc">Sends a JSON payload to your own endpoint — Slack, PagerDuty, ntfy, or anything else.</div>
+          {% if not webhook_configured %}
+          <div class="channel-note">Set CUSTOM_WEBHOOK_URL in the environment before enabling this.</div>
+          {% else %}
+          <div class="channel-note">Webhook URL is configured via the environment and is not shown here.</div>
+          {% endif %}
+          <div class="test-result" id="test-result-webhook"></div>
+        </div>
+        <button type="button" class="btn test-btn" id="test-btn-webhook" {% if not webhook_configured %}disabled{% endif %} onclick="sendTestNotification('webhook')">Send test</button>
+        <label class="toggle">
+          <input type="checkbox" name="notify_webhook_enabled" {% if webhook.enabled %}checked{% endif %} {% if not webhook_configured %}disabled{% endif %}>
+          <span class="track"></span>
+        </label>
+      </div>
+
+      <div class="field-group">
+        <div class="label">Email receivers</div>
+        <div class="hint">Comma-separated addresses that email reports are sent to.</div>
+        <input type="text" name="email_to" value="{{ email.mail_to | join(', ') }}" placeholder="ops@example.com, secops@example.com">
+      </div>
+
+      <div class="settings-footer">
+        <span style="font-size:12.5px;color:var(--text-muted);margin-right:auto;">
+          Checked every scan ({{ cron_schedule if run_mode == 'loop' else 'on each manual run' }}); already-expired credentials get a reminder until rotated.
+        </span>
+      </div>
+    </div>
+
+    <div class="card-surface settings-card">
+      <div class="field-group">
+        <div class="label">Warning thresholds</div>
+        <div class="hint">Comma-separated days-before-expiry that trigger an alert. Also drives the status shown on the Applications page.</div>
+        <input type="text" name="warning_thresholds_days" value="{{ thresholds | map('string') | join(', ') }}" placeholder="30, 14, 7, 1">
+      </div>
+      <div class="settings-footer">
+        <button class="btn primary" type="submit">Save</button>
+      </div>
+    </div>
+  </form>
+{% endblock %}
+{% block scripts %}
+function sendTestNotification(channel) {
+  var btn = document.getElementById('test-btn-' + channel);
+  var result = document.getElementById('test-result-' + channel);
+  btn.disabled = true;
+  var originalLabel = btn.textContent;
+  btn.textContent = 'Sending…';
+  result.className = 'test-result';
+  result.textContent = '';
+  fetch('/api/test-notification/' + channel, { method: 'POST' })
+    .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+    .then(function (res) {
+      if (res.data.ok) {
+        result.className = 'test-result ok';
+        result.textContent = 'Test message sent — check ' + (channel === 'email' ? 'the inbox' : channel === 'teams' ? 'the Teams channel' : 'the endpoint') + '.';
+      } else {
+        result.className = 'test-result fail';
+        result.textContent = 'Failed: ' + res.data.error;
+      }
+    })
+    .catch(function () {
+      result.className = 'test-result fail';
+      result.textContent = 'Failed: could not reach the server.';
+    })
+    .finally(function () {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    });
+}
+{% endblock %}

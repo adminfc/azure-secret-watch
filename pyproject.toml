@@ -1,0 +1,17 @@
+[project]
+name = "azure-secret-watch"
+version = "0.1.0"
+description = "Scans Microsoft Entra ID App Registrations for expiring client secrets and certificates, and alerts via Email, Teams, or webhook before they cause an outage."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

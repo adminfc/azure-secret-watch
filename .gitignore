@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+data/
+certs/
+*.pem
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+/dog.png

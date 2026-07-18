@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}Help · azure-secret-watch{% endblock %}
+{% block extra_style %}
+  .help-section { margin-bottom: 12px; }
+  .help-section summary {
+    cursor: pointer; list-style: none;
+  }
+  .help-section summary::-webkit-details-marker { display: none; }
+  .help-section .section-head {
+    display: flex; align-items: center; gap: 12px; padding: 17px 22px;
+    border-bottom: 1px solid transparent;
+  }
+  .help-section[open] .section-head { border-bottom-color: var(--border); }
+  .help-section .section-head:hover .title { color: var(--accent-text); }
+  .help-section .section-head .channel-icon {
+    width: 34px; height: 34px; border-radius: 9px; background: var(--bg-surface-alt);
+    color: var(--text-secondary); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .help-section .section-head .channel-icon .icon { width: 16px; height: 16px; }
+  .help-section .section-head .title { font-weight: 600; font-size: 14.5px; }
+  .help-section .section-head .desc { color: var(--text-secondary); font-size: 12.5px; margin-top: 2px; }
+  .help-section .section-head .chev {
+    width: 16px; height: 16px; color: var(--text-muted); flex-shrink: 0; margin-left: auto;
+    transition: transform .15s ease;
+  }
+  .help-section[open] .section-head .chev { transform: rotate(180deg); }
+  .help-body { padding: 18px 22px; }
+  .help-body p { margin: 0 0 12px; font-size: 13.5px; color: var(--text-secondary); line-height: 1.55; }
+  .help-body ol, .help-body ul { margin: 0 0 14px; padding-left: 20px; font-size: 13.5px; color: var(--text-secondary); line-height: 1.65; }
+  .help-body li { margin-bottom: 4px; }
+  .help-body .label { font-weight: 600; font-size: 13.5px; color: var(--text-primary); margin: 16px 0 8px; }
+  .help-body .label:first-child { margin-top: 0; }
+  .help-note {
+    font-size: 12.5px; color: var(--text-secondary); background: var(--bg-surface-alt);
+    border-radius: 8px; padding: 10px 14px; margin: 10px 0 14px;
+  }
+  .help-note.warn { background: var(--warning-bg); color: var(--warning-text); }
+  .help-required {
+    font-size: 11px; font-weight: 600; color: var(--accent-text); background: var(--accent-bg);
+    border-radius: 5px; padding: 2px 7px; margin-left: 6px; vertical-align: middle;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    background: var(--bg-surface-alt); border-radius: 4px; padding: 1px 6px;
+  }
+  pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    background: var(--bg-surface-alt); border-radius: 8px; padding: 14px 16px;
+    overflow-x: auto; line-height: 1.6; margin: 0 0 14px;
+  }
+{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1>Help</h1>
+    <p>Frequently asked questions about configuring azure-secret-watch. Click a question to expand it.</p>
+  </div>
+  <div class="meta"></div>
+
+  <div class="help-note">
+    Every answer below points at environment variables, edited in <code>.env</code> — none of it is entered
+    in this web UI, since these values can include credentials. After changing <code>.env</code>, apply it with
+    <code>docker compose up -d</code>. For the notification channels, go to <a href="/settings">Monitoring</a>
+    afterwards and use the <strong>Send test</strong> button to confirm it actually works before relying on it.
+  </div>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
+      <div>
+        <div class="title">How do I authenticate with Azure AD? <span class="help-required">Required</span></div>
+        <div class="desc">Lets azure-secret-watch read App Registrations and their credential metadata via Microsoft Graph.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <ol>
+        <li>Register a dedicated App Registration for this watcher in Microsoft Entra ID.</li>
+        <li>Grant it the <strong>application</strong> permission <code>Application.Read.All</code> (Microsoft Graph), then click <strong>Grant admin consent</strong>.</li>
+        <li>If you plan to enable <code>NOTIFY_OWNERS</code> below, also grant <code>User.Read.All</code> so owner emails can be resolved.</li>
+      </ol>
+      <p>This tool only ever issues Graph <code>GET</code> requests — it cannot read secret values (Graph never returns them after creation) and cannot modify anything.</p>
+      <div class="label">Option A — client secret (simplest)</div>
+      <pre>AZURE_TENANT_ID=&lt;your tenant ID&gt;
+AZURE_CLIENT_ID=&lt;the app registration's client ID&gt;
+AZURE_CLIENT_SECRET=&lt;a client secret you created for it&gt;</pre>
+      <p>This means the watcher's own access depends on a secret that will eventually expire — set yourself a calendar reminder, or prefer Option B for long-lived deployments.</p>
+      <div class="label">Option B — client certificate (recommended for long-lived deployments)</div>
+      <pre>AZURE_CLIENT_CERTIFICATE_PATH=/certs/watcher.pem
+AZURE_CLIENT_CERTIFICATE_PASSWORD=</pre>
+      <p>Mount your <code>.pem</code> (private key + certificate chain) into the container — see the <code>./certs</code> volume in <code>docker-compose.yml</code> — instead of setting <code>AZURE_CLIENT_SECRET</code>.</p>
+    </div>
+  </details>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-bolt"/></svg></span>
+      <div>
+        <div class="title">How do I control what counts as expiring?</div>
+        <div class="desc">Warning thresholds, which credential types to scan, and owner lookups.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <pre>WARNING_THRESHOLDS_DAYS=30,14,7,1
+INCLUDE_SECRETS=true
+INCLUDE_CERTIFICATES=true
+EXPIRED_REMINDER_INTERVAL_DAYS=7
+NOTIFY_OWNERS=false</pre>
+      <ul>
+        <li><code>WARNING_THRESHOLDS_DAYS</code> — comma-separated "days before expiry" that trigger an alert; also editable later from <a href="/settings">Monitoring</a>.</li>
+        <li><code>INCLUDE_SECRETS</code> / <code>INCLUDE_CERTIFICATES</code> — which credential types to scan.</li>
+        <li><code>EXPIRED_REMINDER_INTERVAL_DAYS</code> — how often (in days) to re-notify about something that's still expired and hasn't been rotated.</li>
+        <li><code>NOTIFY_OWNERS</code> — look up each app's owners and show/include them in the dashboard and notifications (requires the <code>User.Read.All</code> permission above).</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-clock"/></svg></span>
+      <div>
+        <div class="title">How often does it scan?</div>
+        <div class="desc">Continuous cron-driven loop, or a single run you schedule yourself.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <pre>RUN_MODE=loop
+CRON_SCHEDULE=0 8 * * *
+RUN_SCAN_ON_STARTUP=true</pre>
+      <ul>
+        <li><code>RUN_MODE=loop</code> (default) — the container keeps running and scans on <code>CRON_SCHEDULE</code> (standard 5-field cron syntax, evaluated in UTC).</li>
+        <li><code>RUN_MODE=once</code> — scan a single time and exit; use this if you're driving the schedule yourself via host cron, systemd, or a Kubernetes CronJob (see <code>docker-compose.once.yml</code>).</li>
+        <li><code>RUN_SCAN_ON_STARTUP</code> — also scan immediately when the container starts (loop mode only), so the dashboard has data right away instead of waiting for the first scheduled run.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-lock"/></svg></span>
+      <div>
+        <div class="title">How do I require a login for the dashboard?</div>
+        <div class="desc">Off by default — this is what the "no authentication" warning on Applications means.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <pre>WEB_UI_ENABLED=true
+WEB_UI_HOST=0.0.0.0
+WEB_UI_PORT=8080
+WEB_UI_USERNAME=
+WEB_UI_PASSWORD=</pre>
+      <p>
+        <code>WEB_UI_USERNAME</code> and <code>WEB_UI_PASSWORD</code> are both blank by default, which means
+        <strong>anyone who can reach this port sees every credential's status and can trigger a scan — no login
+        required</strong>. Set both to turn on HTTP Basic Auth — a browser-native username/password prompt,
+        not a page on this site — for the whole dashboard, then <code>docker compose up -d</code> to apply it.
+      </p>
+    </div>
+  </details>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-database"/></svg></span>
+      <div>
+        <div class="title">What do the storage / advanced settings do?</div>
+        <div class="desc">Mostly fine to leave at the defaults already set in docker-compose.yml.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <ul>
+        <li><code>STATE_DB_PATH</code>, <code>STATUS_FILE_PATH</code>, <code>INVENTORY_FILE_PATH</code>, <code>SCAN_HISTORY_FILE_PATH</code>, <code>SETTINGS_FILE_PATH</code> — where each piece of persisted data lives inside the container; already mapped to the <code>./data</code> volume.</li>
+        <li><code>SCAN_HISTORY_LIMIT</code> — a safety cap on how many scan-history rows can pile up within the rolling 24-hour window the panel keeps.</li>
+        <li><code>DRY_RUN</code> — log what would be sent without actually sending anything or updating dedupe state; useful for a first trial run.</li>
+        <li><code>LOG_LEVEL</code> — standard Python logging level (<code>INFO</code>, <code>DEBUG</code>, <code>WARNING</code>, …).</li>
+        <li><code>GRAPH_PAGE_SIZE</code> / <code>REQUEST_TIMEOUT_SECONDS</code> — pagination size and HTTP timeout for calls to Microsoft Graph; the defaults work for virtually every tenant.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-mail"/></svg></span>
+      <div>
+        <div class="title">How do I set up email alerts?</div>
+        <div class="desc">One alert per credential, per warning threshold crossed, sent to a fixed list of recipients.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <div class="label">Required settings</div>
+      <pre>NOTIFY_EMAIL_ENABLED=true
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_USE_TLS=true
+EMAIL_FROM=azure-secret-watch@example.com
+EMAIL_TO=ops@example.com, secops@example.com</pre>
+      <p>
+        <code>EMAIL_TO</code> is a fixed distribution list (e.g. your ops/security team) — every alert email
+        goes to all of these addresses. It is <strong>not</strong> per-application owner routing: if
+        <code>NOTIFY_OWNERS</code> is enabled, each app's owners are shown inside the email body for reference
+        (so you know who to follow up with), but they are never added as separate recipients.
+      </p>
+    </div>
+  </details>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-bell"/></svg></span>
+      <div>
+        <div class="title">How do I send alerts to Microsoft Teams?</div>
+        <div class="desc">Posts the same alerts as an Adaptive Card to one Teams chat or channel via an incoming webhook.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <div class="label">1. Create the webhook in Teams</div>
+      <ol>
+        <li>In the Teams left-hand app rail, search for and open the <strong>Workflows</strong> app (this is not the same as a "Power Automate" tab added to a channel — you don't need to be inside a channel first).</li>
+        <li>Search for the template <strong>"Send webhook alerts to a chat"</strong>, or build a blank flow with the same trigger and a "Post card in a chat or channel" action (see note below on why you might prefer this).</li>
+        <li>In the wizard, pick the chat or channel you want alerts posted to, then finish it.</li>
+        <li>Copy the generated HTTP POST URL — this is your webhook URL.</li>
+      </ol>
+      <div class="label">2. Configure azure-secret-watch</div>
+      <pre>NOTIFY_TEAMS_ENABLED=true
+TEAMS_WEBHOOK_URL=&lt;the URL you copied&gt;
+TEAMS_WEBHOOK_FORMAT=adaptive_card</pre>
+      <p>
+        <code>TEAMS_WEBHOOK_FORMAT</code> defaults to <code>adaptive_card</code>, which matches the Workflows-based
+        webhook above. Use <code>messagecard</code> only if you're on an older, legacy Office 365 Connector webhook.
+      </p>
+      <div class="help-note">
+        A webhook URL is bound to the one chat or channel you picked when creating it. To also post to a
+        <strong>different destination</strong>, create another flow with that one selected and you'll get another
+        URL — this tool currently sends to one Teams destination at a time.
+      </div>
+      <div class="help-note">
+        If you'd rather not have Teams show "used a Workflow template… Get template" under every message,
+        build the flow from a <strong>blank canvas</strong> (same trigger + "Post card in a chat or channel" action)
+        instead of starting from the template gallery — that attribution line is added by Teams based on how the
+        flow was created, not by anything this tool sends.
+      </div>
+    </div>
+  </details>
+
+  <details class="card-surface help-section">
+    <summary class="section-head">
+      <span class="channel-icon"><svg class="icon"><use href="#i-code"/></svg></span>
+      <div>
+        <div class="title">How do I send alerts somewhere else (Slack, PagerDuty, etc.)?</div>
+        <div class="desc">Sends a generic JSON payload to your own endpoint — Slack, PagerDuty, ntfy, or anything else.</div>
+      </div>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="help-body">
+      <div class="label">Required settings</div>
+      <pre>NOTIFY_WEBHOOK_ENABLED=true
+CUSTOM_WEBHOOK_URL=https://your-endpoint.example.com/hook
+CUSTOM_WEBHOOK_METHOD=POST
+CUSTOM_WEBHOOK_HEADERS={"Authorization": "Bearer &lt;token&gt;"}</pre>
+      <p><code>CUSTOM_WEBHOOK_HEADERS</code> is optional — a JSON object of extra headers, most commonly used for a bearer token or API key the target endpoint expects.</p>
+      <div class="label">Payload shape</div>
+      <pre>{
+  "summary": {"total": 2, "expired": 1, "expiring_soon": 1},
+  "alerts": [
+    {
+      "severity": "expired",
+      "app_display_name": "Billing Service",
+      "credential_type": "secret",
+      "credential_display_name": "prod secret",
+      "days_until_expiry": -3,
+      "owners": ["alice@example.com"],
+      "portal_url": "https://portal.azure.com/..."
+    }
+  ]
+}</pre>
+      <p>
+        This is a generic, tool-agnostic shape — not Slack's or PagerDuty's native message format. If your
+        target expects its own format, put a small relay in between (a Power Automate flow, a Zapier "Catch Hook",
+        or your own tiny endpoint) that reshapes this JSON before forwarding it on.
+      </p>
+    </div>
+  </details>
+{% endblock %}

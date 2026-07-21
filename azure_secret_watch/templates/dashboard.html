@@ -25,6 +25,7 @@
   .stat[data-filter] { cursor: pointer; transition: background .1s ease; }
   .stat[data-filter]:hover { background: var(--bg-surface-alt); }
 
+  .attn-toolbar { margin-bottom: 14px; }
   .attn-card { margin-bottom: 22px; overflow: hidden; }
   .attn-head {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -221,7 +222,7 @@
     {% if rows %}
     <div class="attn-body">
       {% for c in rows %}
-      <div class="attn-row">
+      <div class="attn-row" data-search="{{ (c.app_display_name ~ ' ' ~ c.display_name) | lower }}">
         <div class="attn-main">
           <div class="attn-title">{{ c.app_display_name }} <span class="attn-cred">— {{ c.display_name }}</span></div>
           <div class="attn-sub">
@@ -240,6 +241,7 @@
         </div>
       </div>
       {% endfor %}
+      <div class="attn-empty attn-no-match" style="display:none;">No matches.</div>
     </div>
     {% else %}
     <div class="attn-empty">{{ empty_text }}</div>
@@ -248,6 +250,12 @@
   {% endmacro %}
 
   {% if not view_all %}
+  <div class="attn-toolbar">
+    <div class="search-box">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input id="attn-search" type="search" placeholder="Search application / credential...">
+    </div>
+  </div>
   {{ attention_card('Expired', 'expired', summary.expired, 'No expired credentials.') }}
   {{ attention_card('Expiring soon', 'warning', summary.warning, 'Nothing expiring soon.') }}
   {% endif %}
@@ -379,6 +387,30 @@
       window.location.href = f ? ('/?view=all&status=' + encodeURIComponent(f)) : '/?view=all';
     });
   });
+})();
+
+(function () {
+  var search = document.getElementById('attn-search');
+  if (!search) return;
+
+  var cards = document.querySelectorAll('.attn-card');
+
+  function render() {
+    var q = search.value.trim().toLowerCase();
+    cards.forEach(function (card) {
+      var rows = card.querySelectorAll('.attn-row');
+      var visible = 0;
+      rows.forEach(function (row) {
+        var match = !q || row.dataset.search.indexOf(q) !== -1;
+        row.style.display = match ? '' : 'none';
+        if (match) visible++;
+      });
+      var noMatch = card.querySelector('.attn-no-match');
+      if (noMatch) noMatch.style.display = rows.length && !visible ? 'block' : 'none';
+    });
+  }
+
+  search.addEventListener('input', render);
 })();
 
 (function () {

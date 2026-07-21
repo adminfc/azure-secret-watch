@@ -111,6 +111,41 @@ def test_dashboard_shows_needs_attention_and_hides_full_list_by_default(tmp_path
     assert "Internal Portal" not in attention_html
 
 
+def test_dashboard_attention_rows_are_searchable_by_app_name(tmp_path):
+    config = make_config(tmp_path)
+    write_json(
+        config.inventory_file_path,
+        {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "credentials": [
+                {
+                    "app_display_name": "Billing Service",
+                    "app_id": "app-1",
+                    "app_object_id": "obj-1",
+                    "credential_type": "secret",
+                    "display_name": "prod secret",
+                    "key_id": "k1",
+                    "start_datetime": "2020-01-01T00:00:00+00:00",
+                    "end_datetime": "2026-01-05T00:00:00+00:00",
+                    "days_until_expiry": 3,
+                    "is_expired": False,
+                    "status": "warning",
+                    "portal_url": "https://portal.azure.com/x",
+                },
+            ],
+        },
+    )
+    client = web.create_app(config).test_client()
+
+    body = client.get("/").get_data(as_text=True)
+
+    assert 'id="attn-search"' in body
+    assert 'data-search="billing service prod secret"' in body
+
+    view_all_body = client.get("/?view=all").get_data(as_text=True)
+    assert 'id="attn-search"' not in view_all_body
+
+
 def test_dashboard_view_all_query_param_shows_full_list_and_presets_filter(tmp_path):
     config = make_config(tmp_path)
     write_json(

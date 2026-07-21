@@ -35,6 +35,15 @@ enough lead time to rotate it.
 - 🐳 Ships as a single Docker Compose service; no separate always-on server or
   Logic App required
 
+## Screenshots
+
+<p>
+  <img src="docs/screenshots/applications.png" alt="Applications page showing expired and expiring-soon credentials" width="49%">
+  <img src="docs/screenshots/monitoring.png" alt="Monitoring page with per-channel Send test buttons" width="49%">
+</p>
+
+*(Sample data shown above — no real tenant data.)*
+
 ## How it works
 
 1. Authenticates to Microsoft Graph as its own App Registration (client

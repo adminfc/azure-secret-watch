@@ -27,6 +27,15 @@ App Registration，在密码/证书即将到期前通过邮件、Teams 或 Webho
   可折叠的问答形式——本 README 的"配置项"一节内容与它保持一致
 - 🐳 单个 Docker Compose 服务即可部署，无需常驻 Logic App 或额外的调度服务器
 
+## 截图
+
+<p>
+  <img src="docs/screenshots/applications.png" alt="Applications 页面，展示已过期和即将到期的凭据" width="49%">
+  <img src="docs/screenshots/monitoring.png" alt="Monitoring 页面，每个通知渠道都有 Send test 按钮" width="49%">
+</p>
+
+*（以上均为示例数据，非真实租户数据。）*
+
 ## 工作原理
 
 1. 使用自己的一个 App Registration（客户端密码或证书）向 Microsoft Graph 认证。

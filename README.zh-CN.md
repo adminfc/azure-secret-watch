@@ -20,7 +20,11 @@ App Registration，在密码/证书即将到期前通过邮件、Teams 或 Webho
 - 🔒 只读权限接入（`Application.Read.All`），不读取、不记录、不传输密码本身
   （Graph 创建密码后本就不会再返回其明文），不做任何写操作
 - 🖥️ 内置 Web 管理面板：可排序/分页的凭据表格、搜索与状态筛选、CSV 导出、
-  扫描历史记录、亮/暗主题切换，并可一键手动触发扫描
+  最近 24 小时的扫描历史记录，并可一键手动触发扫描
+- 🧪 每个通知渠道都有"Send test"测试发送按钮，配置好之后可以先验证一下
+  Email / Teams / Webhook 是否真的能收到，而不是等真正告警时才发现配错了
+- ❓ 内置 **Help** 帮助页面（顶部导航栏的"?"图标），把所有环境变量都整理成
+  可折叠的问答形式——本 README 的"配置项"一节内容与它保持一致
 - 🐳 单个 Docker Compose 服务即可部署，无需常驻 Logic App 或额外的调度服务器
 
 ## 工作原理
@@ -98,65 +102,173 @@ docker compose -f docker-compose.once.yml run --rm azure-secret-watch
 
 ## 配置项
 
-所有配置均通过环境变量完成，完整且带注释的清单见
-[`.env.example`](.env.example)，主要包括：
+所有配置都是 `.env` 里的环境变量——这些值可能包含密钥，所以都不会在网页里
+填写。这一节的内容和 Web 面板里内置的 **Help** 帮助页面（顶部导航栏的"?"
+图标）保持一致，那里把同样的变量整理成了可折叠的问答形式。改完 `.env` 后
+用 `docker compose up -d` 应用；通知渠道配置好之后，去 Monitoring 页面点
+**Send test** 按钮验证一下真的能收到，而不是等真正告警时才发现配错了。
 
-| 分类 | 关键变量 |
-| --- | --- |
-| Azure 认证 | `AZURE_TENANT_ID`、`AZURE_CLIENT_ID`、`AZURE_CLIENT_SECRET` 或 `AZURE_CLIENT_CERTIFICATE_PATH` |
-| 扫描行为 | `WARNING_THRESHOLDS_DAYS`、`INCLUDE_SECRETS`、`INCLUDE_CERTIFICATES`、`NOTIFY_OWNERS`、`EXPIRED_REMINDER_INTERVAL_DAYS` |
-| 调度 | `RUN_MODE`（`loop`/`once`）、`CRON_SCHEDULE` |
-| 邮件 | `NOTIFY_EMAIL_ENABLED`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD`、`EMAIL_FROM`、`EMAIL_TO` |
-| Teams | `NOTIFY_TEAMS_ENABLED`、`TEAMS_WEBHOOK_URL`、`TEAMS_WEBHOOK_FORMAT` |
-| 自定义 Webhook | `NOTIFY_WEBHOOK_ENABLED`、`CUSTOM_WEBHOOK_URL`、`CUSTOM_WEBHOOK_METHOD`、`CUSTOM_WEBHOOK_HEADERS` |
-| Web 面板 | `WEB_UI_ENABLED`、`WEB_UI_PORT`、`WEB_UI_USERNAME`、`WEB_UI_PASSWORD` |
-| 安全 | `DRY_RUN`、`LOG_LEVEL` |
+### Azure AD 认证（必填）
 
-### Web 管理面板
+1. 在 Microsoft Entra ID 里为本工具注册一个专用的 App Registration。
+2. 授予它 **application** 权限 `Application.Read.All`（Microsoft Graph），
+   然后点击 **Grant admin consent**。
+3. 如果你打算启用下面的 `NOTIFY_OWNERS`，还需要额外授予 `User.Read.All`
+   以便解析所有者邮箱。
 
-只要 `RUN_MODE=loop`，默认会在 `http://<host>:8080` 启用。它读取每次扫描后
-写入本地的 JSON 缓存文件渲染，不会额外调用 Graph API，也不影响通知/去重逻辑。
+本工具只会发起 Graph 的 `GET` 请求——读不到密码明文（Graph 创建后本就不会
+再返回），也不会修改任何东西。
 
-**在把端口暴露到本机以外之前，请先设置 `WEB_UI_USERNAME` 和
-`WEB_UI_PASSWORD`。** 留空的话面板不做任何身份验证 —— 仅本机访问（
-`localhost`）没问题，但如果这个端口能被你的内网或公网访问到就不安全了。
-要么把这两个变量都设置好（会启用 HTTP Basic Auth），要么把端口放在你自己的
-反向代理 / VPN / 防火墙规则后面。无论如何，面板都不会显示密码或证书明文
-——只有名称、key id 和到期时间——但它确实会暴露你的 App Registration 清单，
-仍然值得做好访问控制。
+**方案 A —— 客户端密码（最简单）**
 
-设置 `WEB_UI_ENABLED=false` 可以完全禁用它。
+```env
+AZURE_TENANT_ID=<你的 tenant ID>
+AZURE_CLIENT_ID=<这个 App Registration 的 client ID>
+AZURE_CLIENT_SECRET=<为它创建的客户端密码>
+```
 
-#### Monitoring（监控设置）页面
+这意味着本工具自己的访问权限也依赖一个终将过期的密码——记得给自己设个日历
+提醒，或者优先选方案 B（适合长期运行的部署）。
 
-侧边栏的 **Monitoring** 页面可以直接开关每个通知渠道、编辑收件邮箱列表、
-调整提醒档位——全程不需要修改 `.env` 或重新部署容器。只有当某个渠道的底层
-连接信息（SMTP 主机、Teams/Webhook URL）已经通过环境变量配置好时，才能在
-页面里把它打开；出于安全考虑，页面本身从不显示这些 URL（它们通常携带了
-鉴权 token）。修改会保存到 `SETTINGS_FILE_PATH`（默认 `/data/settings.json`）
-并立即生效，容器下次启动时也会在 `.env` 配置之上重新应用这些覆盖项。
+**方案 B —— 客户端证书（推荐用于长期部署）**
 
-#### 所有者（Owners）列
+```env
+AZURE_CLIENT_CERTIFICATE_PATH=/certs/watcher.pem
+AZURE_CLIENT_CERTIFICATE_PASSWORD=
+```
 
-设置 `NOTIFY_OWNERS=true` 后面板会多出一列"所有者"，数据来自 Microsoft
-Graph 的 `/applications/{id}/owners`——也就是 Entra ID 里真实的所有者关系，
-不是本工具凭空生成或代替你分配的。这需要额外授予 `User.Read.All` 权限（在
-`Application.Read.All` 之外）并完成管理员同意；没有这个权限的话，所有者查询
-会静默失败（日志里能看到，但不影响扫描），表现就是每个应用都查不到所有者。
-如果某个应用在 Entra ID 里确实没有设置所有者——这在通过 CI/CD 或 Terraform
-创建的服务类应用里很常见——面板会把它标记为"无所有者"，并在顶部用一个提示
-标签汇总数量。这种情况建议直接去 Entra ID（App registrations → 该应用 →
-Owners）补上真实的所有者，而不是在本工具里绕过去。
+把你的 `.pem`（私钥 + 证书链）挂载进容器——参见 `docker-compose.yml` 里的
+`./certs` 卷——就不用再设置 `AZURE_CLIENT_SECRET` 了。
 
-### Microsoft Teams Webhook 配置
+### 扫描行为
 
-在目标 Teams 频道中：**⋯ → Workflows →
-"Post to a channel when a webhook request is received"**（这是微软用来替代
-已废弃的 Office 365 Connector webhook 的新方式）。将生成的 URL 填入
-`TEAMS_WEBHOOK_URL`。如果你仍在使用旧版 Office 365 Connector webhook，则将
-`TEAMS_WEBHOOK_FORMAT` 设为 `messagecard`。
+```env
+WARNING_THRESHOLDS_DAYS=30,14,7,1
+INCLUDE_SECRETS=true
+INCLUDE_CERTIFICATES=true
+EXPIRED_REMINDER_INTERVAL_DAYS=7
+NOTIFY_OWNERS=false
+```
 
-### 自定义 Webhook 的请求体
+- `WARNING_THRESHOLDS_DAYS` —— 逗号分隔的"到期前多少天"提醒档位；后续也可以
+  在 Monitoring 页面直接修改。
+- `INCLUDE_SECRETS` / `INCLUDE_CERTIFICATES` —— 扫描哪些凭据类型。
+- `EXPIRED_REMINDER_INTERVAL_DAYS` —— 已经过期、还没轮换的凭据，间隔多少天
+  重新提醒一次。
+- `NOTIFY_OWNERS` —— 通过 `/applications/{id}/owners` 查询每个应用的所有者，
+  并在面板和通知里展示（需要上面提到的 `User.Read.All` 权限）。这是 Entra ID
+  里真实的所有者关系，不是本工具凭空生成或代替你分配的——确实没有所有者的
+  应用会被标记为"无所有者"，并在顶部用提示标签汇总数量。
+
+### 调度
+
+```env
+RUN_MODE=loop
+CRON_SCHEDULE=0 8 * * *
+RUN_SCAN_ON_STARTUP=true
+```
+
+- `RUN_MODE=loop`（默认）—— 容器持续运行，按 `CRON_SCHEDULE`（标准 5 段式
+  cron 语法，按 UTC 计算）扫描。
+- `RUN_MODE=once` —— 只扫描一次然后退出；如果你想用宿主机 cron、systemd 或
+  Kubernetes CronJob 自己控制调度，用这个（参见 `docker-compose.once.yml`）。
+- `RUN_SCAN_ON_STARTUP` —— 容器启动时额外立即扫描一次（仅 loop 模式），这样
+  面板马上就有数据，不用等第一次定时扫描。
+
+### Web 面板与访问控制
+
+```env
+WEB_UI_ENABLED=true
+WEB_UI_HOST=0.0.0.0
+WEB_UI_PORT=8080
+WEB_UI_USERNAME=
+WEB_UI_PASSWORD=
+```
+
+`WEB_UI_USERNAME` 和 `WEB_UI_PASSWORD` 默认都是空的，也就是说**任何能访问到
+这个端口的人都能看到所有凭据的状态、还能触发扫描——不需要登录**。把这两个都
+填上就会给整个面板开启 HTTP Basic Auth（浏览器原生的用户名/密码弹窗，不是网页
+里的表单），填完后 `docker compose up -d` 应用。不管有没有开认证，面板都只
+展示名称、key id 和到期时间，不会显示密码或证书明文——但它确实会暴露你的
+App Registration 清单，仍然值得做好访问控制。设置 `WEB_UI_ENABLED=false`
+可以完全禁用面板。
+
+### 存储与高级选项
+
+大部分情况下用 `docker-compose.yml` 里的默认值就行，不需要改。
+
+- `STATE_DB_PATH`、`STATUS_FILE_PATH`、`INVENTORY_FILE_PATH`、
+  `SCAN_HISTORY_FILE_PATH`、`SETTINGS_FILE_PATH` —— 各类持久化数据在容器内
+  的存放路径，都在 `/data` 下，已经映射到 `./data` 卷。这些文件和任何日志
+  输出一样，都不会包含真实的密码明文或证书私钥。
+- `SCAN_HISTORY_LIMIT` —— 面板"扫描历史"面板保留的最近 24 小时窗口内，最多
+  能堆积的记录条数上限（超过 24 小时的记录会自动清理）。
+- `DRY_RUN` —— 只把本应发送的内容打印到日志，不会真正发送，也不会更新去重
+  状态；适合第一次试运行。
+- `LOG_LEVEL` —— 标准 Python 日志级别（`INFO`、`DEBUG`、`WARNING` 等）。
+- `GRAPH_PAGE_SIZE` / `REQUEST_TIMEOUT_SECONDS` —— 调用 Microsoft Graph 的
+  分页大小和请求超时时间；默认值对绝大多数租户都够用。
+
+### Email（SMTP）
+
+```env
+NOTIFY_EMAIL_ENABLED=true
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_USE_TLS=true
+EMAIL_FROM=azure-secret-watch@example.com
+EMAIL_TO=ops@example.com, secops@example.com
+```
+
+`EMAIL_TO` 是一个固定的收件人列表（比如你的运维/安全团队）——所有告警邮件
+都会发给这几个地址，**不是**按应用所有者分别路由：如果开启了
+`NOTIFY_OWNERS`，每个应用的所有者会显示在邮件正文里供参考（方便你知道该找
+谁），但不会被当作单独的收件人。
+
+### Microsoft Teams
+
+1. 在 Teams 左侧应用栏搜索并打开 **Workflows** 应用（不是频道里加的
+   "Power Automate" 标签页——不需要先进某个频道）。
+2. 搜索模板 **"Send webhook alerts to a chat"**，或者用同样的触发器 +
+   "Post card in a chat or channel" 动作手动搭一个空白 flow（原因见下方
+   备注）。
+3. 在向导里选好要发送到的聊天或频道，完成设置。
+4. 复制生成的 HTTP POST URL——这就是你的 webhook 地址。
+
+```env
+NOTIFY_TEAMS_ENABLED=true
+TEAMS_WEBHOOK_URL=<你复制的 URL>
+TEAMS_WEBHOOK_FORMAT=adaptive_card
+```
+
+`TEAMS_WEBHOOK_FORMAT` 默认是 `adaptive_card`，对应上面用 Workflows 建的
+webhook；只有你用的是旧版 Office 365 Connector webhook 时才需要改成
+`messagecard`。
+
+一个 webhook URL 只绑定创建它时选的那一个聊天/频道。如果还想发到别的地方，
+需要另外建一个 flow、拿一个新的 URL——目前本工具一次只能发送到一个 Teams
+目的地。
+
+如果不想让 Teams 在每条消息下面显示"used a Workflow template… Get
+template"这行字，可以不用模板库，改成从**空白画布**手动搭建同样的触发器 +
+"Post card in a chat or channel"动作——这行提示是 Teams 根据 flow 的创建
+方式自动加的，不是本工具发送内容的一部分。
+
+### 自定义 Webhook
+
+```env
+NOTIFY_WEBHOOK_ENABLED=true
+CUSTOM_WEBHOOK_URL=https://your-endpoint.example.com/hook
+CUSTOM_WEBHOOK_METHOD=POST
+CUSTOM_WEBHOOK_HEADERS={"Authorization": "Bearer <token>"}
+```
+
+`CUSTOM_WEBHOOK_HEADERS` 是可选的——一个 JSON 格式的额外请求头对象，最常见
+的用途是给目标端点传 Bearer Token 或 API Key。
+
+请求体格式：
 
 ```json
 {
@@ -165,31 +277,20 @@ Owners）补上真实的所有者，而不是在本工具里绕过去。
     {
       "severity": "expired",
       "app_display_name": "Billing Service",
-      "app_id": "00000000-0000-0000-0000-000000000000",
       "credential_type": "secret",
+      "credential_display_name": "prod secret",
       "days_until_expiry": -3,
-      "portal_url": "https://portal.azure.com/...",
-      "owners": []
+      "owners": ["alice@example.com"],
+      "portal_url": "https://portal.azure.com/..."
     }
   ]
 }
 ```
 
-可以接入 Slack、PagerDuty、ntfy 或你自己的系统；如果接收端需要鉴权，可通过
-`CUSTOM_WEBHOOK_HEADERS` 设置 Bearer Token / API Key 等请求头。
-
-## 数据与隐私
-
-本工具在 `/data` 下持久化的状态仅包括：
-
-- `state.db` —— 一个 SQLite 文件，记录"(凭据 key id, 提醒档位)"上次提醒的
-  时间，仅用于避免重复提醒。
-- `last_run.json` —— 最近一次扫描的结果，供 Docker healthcheck 使用。
-- `inventory.json` —— Web 面板展示用的完整凭据清单及到期状态。
-- `settings.json` —— 从 Monitoring 页面保存的通知渠道/提醒档位覆盖项（见
-  上文）；在你第一次于该页面保存修改之前，这个文件不存在。
-
-无论是这些文件还是任何日志输出，都不会包含真实的密码明文或证书私钥。
+这是一个通用的、跟具体平台无关的格式——不是 Slack 或 PagerDuty 自己的消息
+格式。如果目标系统需要它自己的格式，中间加一层转发（Power Automate flow、
+Zapier 的"Catch Hook"、或者你自己的一个小接口）把这段 JSON 转换一下再转发
+过去即可。
 
 ## 开发
 

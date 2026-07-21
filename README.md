@@ -25,8 +25,13 @@ enough lead time to rotate it.
   never reads, logs, or transmits actual secret values — Graph itself never
   returns them after creation
 - 🖥️ Built-in web dashboard: sortable/paginated credential table, search and
-  status filters, CSV export, scan history, light/dark theme, and a manual
+  status filters, CSV export, a rolling 24-hour scan history, and a manual
   "scan now" button
+- 🧪 A "Send test" button per notification channel, so you can confirm Email /
+  Teams / webhook actually works before relying on it
+- ❓ An in-app **Help** page (the "?" icon in the top nav) documenting every
+  environment variable as a collapsible FAQ — this README's Configuration
+  section mirrors it
 - 🐳 Ships as a single Docker Compose service; no separate always-on server or
   Logic App required
 
@@ -116,71 +121,191 @@ docker compose -f docker-compose.once.yml run --rm azure-secret-watch
 
 ## Configuration
 
-All configuration is via environment variables — see
-[`.env.example`](.env.example) for the full, documented list, including:
+Every setting is an environment variable in `.env` — none of it is entered in
+the web UI, since these values can include credentials. This section mirrors
+the in-app **Help** page (the "?" icon in the top nav of the web dashboard),
+which documents the same variables as a collapsible FAQ. After changing
+`.env`, apply it with `docker compose up -d`; for the notification channels,
+use the **Send test** button on the Monitoring page afterwards to confirm it
+actually works before relying on it.
 
-| Area | Key variables |
-| --- | --- |
-| Azure auth | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` or `AZURE_CLIENT_CERTIFICATE_PATH` |
-| Scan behavior | `WARNING_THRESHOLDS_DAYS`, `INCLUDE_SECRETS`, `INCLUDE_CERTIFICATES`, `NOTIFY_OWNERS`, `EXPIRED_REMINDER_INTERVAL_DAYS` |
-| Scheduling | `RUN_MODE` (`loop`/`once`), `CRON_SCHEDULE` |
-| Email | `NOTIFY_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `EMAIL_FROM`, `EMAIL_TO` |
-| Teams | `NOTIFY_TEAMS_ENABLED`, `TEAMS_WEBHOOK_URL`, `TEAMS_WEBHOOK_FORMAT` |
-| Custom webhook | `NOTIFY_WEBHOOK_ENABLED`, `CUSTOM_WEBHOOK_URL`, `CUSTOM_WEBHOOK_METHOD`, `CUSTOM_WEBHOOK_HEADERS` |
-| Web dashboard | `WEB_UI_ENABLED`, `WEB_UI_PORT`, `WEB_UI_USERNAME`, `WEB_UI_PASSWORD` |
-| Safety | `DRY_RUN`, `LOG_LEVEL` |
+### Azure AD authentication (required)
 
-### Web dashboard
+1. Register a dedicated App Registration for this watcher in Microsoft Entra ID.
+2. Grant it the **application** permission `Application.Read.All` (Microsoft
+   Graph), then click **Grant admin consent**.
+3. If you plan to enable `NOTIFY_OWNERS` below, also grant `User.Read.All` so
+   owner emails can be resolved.
 
-Enabled by default at `http://<host>:8080` whenever `RUN_MODE=loop`. It reads
-from a local JSON cache written after each scan — no extra Graph calls, and
-no impact on the notification/dedupe logic.
+This tool only ever issues Graph `GET` requests — it cannot read secret
+values (Graph never returns them after creation) and cannot modify anything.
 
-**Set `WEB_UI_USERNAME` and `WEB_UI_PASSWORD` before exposing the port beyond
-your own machine.** Left blank, the dashboard has no authentication at all —
-fine for `localhost`-only access, not fine if the port is reachable from your
-network or the internet. Either set both variables (enables HTTP Basic Auth)
-or put the port behind your own reverse proxy / VPN / firewall rule. The
+**Option A — client secret (simplest)**
+
+```env
+AZURE_TENANT_ID=<your tenant ID>
+AZURE_CLIENT_ID=<the app registration's client ID>
+AZURE_CLIENT_SECRET=<a client secret you created for it>
+```
+
+This means the watcher's own access depends on a secret that will eventually
+expire — set yourself a calendar reminder, or prefer Option B for long-lived
+deployments.
+
+**Option B — client certificate (recommended for long-lived deployments)**
+
+```env
+AZURE_CLIENT_CERTIFICATE_PATH=/certs/watcher.pem
+AZURE_CLIENT_CERTIFICATE_PASSWORD=
+```
+
+Mount your `.pem` (private key + certificate chain) into the container — see
+the `./certs` volume in `docker-compose.yml` — instead of setting
+`AZURE_CLIENT_SECRET`.
+
+### Scan behavior
+
+```env
+WARNING_THRESHOLDS_DAYS=30,14,7,1
+INCLUDE_SECRETS=true
+INCLUDE_CERTIFICATES=true
+EXPIRED_REMINDER_INTERVAL_DAYS=7
+NOTIFY_OWNERS=false
+```
+
+- `WARNING_THRESHOLDS_DAYS` — comma-separated "days before expiry" that
+  trigger an alert; also editable later from the Monitoring page.
+- `INCLUDE_SECRETS` / `INCLUDE_CERTIFICATES` — which credential types to scan.
+- `EXPIRED_REMINDER_INTERVAL_DAYS` — how often (in days) to re-notify about
+  something that's still expired and hasn't been rotated.
+- `NOTIFY_OWNERS` — look up each app's owners via
+  `/applications/{id}/owners` and show/include them in the dashboard and
+  notifications (requires the `User.Read.All` permission above). This is
+  Entra ID's real ownership data, not something this tool invents or lets
+  you assign — apps with genuinely no owner assigned show up as "no owner"
+  and are called out in a summary chip.
+
+### Scheduling
+
+```env
+RUN_MODE=loop
+CRON_SCHEDULE=0 8 * * *
+RUN_SCAN_ON_STARTUP=true
+```
+
+- `RUN_MODE=loop` (default) — the container keeps running and scans on
+  `CRON_SCHEDULE` (standard 5-field cron syntax, evaluated in UTC).
+- `RUN_MODE=once` — scan a single time and exit; use this if you're driving
+  the schedule yourself via host cron, systemd, or a Kubernetes CronJob (see
+  `docker-compose.once.yml`).
+- `RUN_SCAN_ON_STARTUP` — also scan immediately when the container starts
+  (loop mode only), so the dashboard has data right away instead of waiting
+  for the first scheduled run.
+
+### Web dashboard & access
+
+```env
+WEB_UI_ENABLED=true
+WEB_UI_HOST=0.0.0.0
+WEB_UI_PORT=8080
+WEB_UI_USERNAME=
+WEB_UI_PASSWORD=
+```
+
+`WEB_UI_USERNAME` and `WEB_UI_PASSWORD` are both blank by default, which
+means **anyone who can reach this port sees every credential's status and
+can trigger a scan — no login required**. Set both to turn on HTTP Basic
+Auth — a browser-native username/password prompt, not a page on the site —
+for the whole dashboard, then `docker compose up -d` to apply it. The
 dashboard never shows secret or certificate values regardless — only names,
 key ids, and expiry dates — but it does reveal your App Registration
-inventory, which is still worth keeping access-controlled.
+inventory, which is still worth keeping access-controlled. Set
+`WEB_UI_ENABLED=false` to disable the dashboard entirely.
 
-#### Owners column
+### Storage & advanced
 
-Set `NOTIFY_OWNERS=true` to add an "Owners" column to the dashboard, backed
-by Microsoft Graph's `/applications/{id}/owners` — Entra ID's real ownership
-data, not something this tool invents or lets you assign. It requires the
-`User.Read.All` Graph permission (in addition to `Application.Read.All`) with
-admin consent granted; without it, owner lookups fail silently (logged, not
-fatal) and every app shows no owner. Apps with genuinely no owner assigned in
-Entra ID — common for service accounts created via CI/CD or Terraform — show
-up as "no owner" and are called out in a summary chip, since that's usually
-worth fixing at the source (Entra ID → App registrations → the app → Owners)
-rather than worked around.
+Mostly fine to leave at the defaults already set in `docker-compose.yml`.
 
-Set `WEB_UI_ENABLED=false` to disable it entirely.
+- `STATE_DB_PATH`, `STATUS_FILE_PATH`, `INVENTORY_FILE_PATH`,
+  `SCAN_HISTORY_FILE_PATH`, `SETTINGS_FILE_PATH` — where each piece of
+  persisted data lives inside the container, all under `/data`; already
+  mapped to the `./data` volume. None of these files, nor any log line, ever
+  contain an actual secret value or certificate private key.
+- `SCAN_HISTORY_LIMIT` — a safety cap on how many scan-history rows can pile
+  up within the rolling 24-hour window the dashboard's history panel keeps
+  (entries older than 24 hours are dropped automatically).
+- `DRY_RUN` — log what would be sent without actually sending anything or
+  updating dedupe state; useful for a first trial run.
+- `LOG_LEVEL` — standard Python logging level (`INFO`, `DEBUG`, `WARNING`, …).
+- `GRAPH_PAGE_SIZE` / `REQUEST_TIMEOUT_SECONDS` — pagination size and HTTP
+  timeout for calls to Microsoft Graph; the defaults work for virtually
+  every tenant.
 
-#### Monitoring page
+### Email (SMTP)
 
-The **Monitoring** page in the sidebar lets you toggle each notification
-channel on/off, edit the email recipient list, and adjust the warning
-thresholds — all without editing `.env` or redeploying the container. A
-channel can only be turned on if its underlying connection details (SMTP
-host, Teams/webhook URL) are already set via the environment; the page never
-displays those URLs, since they often carry an embedded token. Changes are
-saved to `SETTINGS_FILE_PATH` (default `/data/settings.json`) and take effect
-immediately, and are re-applied on top of your `.env` values the next time
-the container starts.
+```env
+NOTIFY_EMAIL_ENABLED=true
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_USE_TLS=true
+EMAIL_FROM=azure-secret-watch@example.com
+EMAIL_TO=ops@example.com, secops@example.com
+```
 
-### Microsoft Teams webhook setup
+`EMAIL_TO` is a fixed distribution list (e.g. your ops/security team) —
+every alert email goes to all of these addresses. It is **not**
+per-application owner routing: if `NOTIFY_OWNERS` is enabled, each app's
+owners are shown inside the email body for reference (so you know who to
+follow up with), but they are never added as separate recipients.
 
-In the target Teams channel: **⋯ → Workflows → "Post to a channel when a
-webhook request is received"** (this replaced the legacy Office 365 Connector
-webhooks, which Microsoft has deprecated). Copy the generated URL into
-`TEAMS_WEBHOOK_URL`. If you're still using an old Office 365 Connector
-webhook, set `TEAMS_WEBHOOK_FORMAT=messagecard` instead.
+### Microsoft Teams
 
-### Custom webhook payload
+1. In the Teams left-hand app rail, search for and open the **Workflows**
+   app (this is not the same as a "Power Automate" tab added to a channel —
+   you don't need to be inside a channel first).
+2. Search for the template **"Send webhook alerts to a chat"**, or build a
+   blank flow with the same trigger and a "Post card in a chat or channel"
+   action (see the note below on why you might prefer this).
+3. In the wizard, pick the chat or channel you want alerts posted to, then
+   finish it.
+4. Copy the generated HTTP POST URL — this is your webhook URL.
+
+```env
+NOTIFY_TEAMS_ENABLED=true
+TEAMS_WEBHOOK_URL=<the URL you copied>
+TEAMS_WEBHOOK_FORMAT=adaptive_card
+```
+
+`TEAMS_WEBHOOK_FORMAT` defaults to `adaptive_card`, which matches the
+Workflows-based webhook above. Use `messagecard` only if you're on an older,
+legacy Office 365 Connector webhook.
+
+A webhook URL is bound to the one chat or channel you picked when creating
+it. To also post to a different destination, create another flow with that
+one selected and you'll get another URL — this tool currently sends to one
+Teams destination at a time.
+
+If you'd rather not have Teams show "used a Workflow template… Get template"
+under every message, build the flow from a blank canvas (same trigger +
+"Post card in a chat or channel" action) instead of starting from the
+template gallery — that attribution line is added by Teams based on how the
+flow was created, not by anything this tool sends.
+
+### Custom webhook
+
+```env
+NOTIFY_WEBHOOK_ENABLED=true
+CUSTOM_WEBHOOK_URL=https://your-endpoint.example.com/hook
+CUSTOM_WEBHOOK_METHOD=POST
+CUSTOM_WEBHOOK_HEADERS={"Authorization": "Bearer <token>"}
+```
+
+`CUSTOM_WEBHOOK_HEADERS` is optional — a JSON object of extra headers, most
+commonly used for a bearer token or API key the target endpoint expects.
+
+Payload shape:
 
 ```json
 {
@@ -189,35 +314,20 @@ webhook, set `TEAMS_WEBHOOK_FORMAT=messagecard` instead.
     {
       "severity": "expired",
       "app_display_name": "Billing Service",
-      "app_id": "00000000-0000-0000-0000-000000000000",
       "credential_type": "secret",
+      "credential_display_name": "prod secret",
       "days_until_expiry": -3,
-      "portal_url": "https://portal.azure.com/...",
-      "owners": []
+      "owners": ["alice@example.com"],
+      "portal_url": "https://portal.azure.com/..."
     }
   ]
 }
 ```
 
-Wire this up to Slack, PagerDuty, ntfy, or any system of your own — set
-`CUSTOM_WEBHOOK_HEADERS` for bearer-token/API-key auth if the receiving side
-needs it.
-
-## Data & privacy
-
-The only state the watcher persists (under `/data`) is:
-
-- `state.db` — a SQLite file mapping `(credential key id, warning threshold)`
-  to the timestamp it was last notified, purely to avoid duplicate alerts.
-- `last_run.json` — the outcome of the most recent scan, used by the Docker
-  healthcheck.
-- `inventory.json` — the full credential list and expiry status shown on the
-  web dashboard.
-- `settings.json` — the notification/threshold overrides made from the
-  Monitoring page (see above); absent until you save a change there.
-
-Neither file, nor any log line, ever contains an actual secret value or
-certificate private key.
+This is a generic, tool-agnostic shape — not Slack's or PagerDuty's native
+message format. If your target expects its own format, put a small relay in
+between (a Power Automate flow, a Zapier "Catch Hook", or your own tiny
+endpoint) that reshapes this JSON before forwarding it on.
 
 ## Development
 

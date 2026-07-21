@@ -176,3 +176,143 @@ def test_extract_credentials_tags_service_principal_object_kind():
     )
     assert len(creds) == 1
     assert creds[0].object_kind == "service_principal"
+
+
+def _saml_cert_pair(identifier, sign_key_id, verify_key_id, start, end):
+    # A real service principal's keyCredentials list each physical
+    # certificate twice — once per usage — with everything else identical.
+    common = {
+        "customKeyIdentifier": identifier,
+        "displayName": "CN=Microsoft Azure Federated SSO Certificate",
+        "startDateTime": start,
+        "endDateTime": end,
+        "type": "AsymmetricX509Cert",
+    }
+    return [
+        {**common, "keyId": verify_key_id, "usage": "Verify"},
+        {**common, "keyId": sign_key_id, "usage": "Sign"},
+    ]
+
+
+def test_extract_credentials_only_yields_the_active_saml_certificate():
+    # Shaped after a real tenant's service principal with 3 rotated
+    # certificates: one active (furthest expiry), one inactive, one expired.
+    sp = {
+        "id": "sp-1",
+        "appId": "app-1",
+        "displayName": "Contoso SSO App",
+        "keyCredentials": [
+            *_saml_cert_pair(
+                "active-cert", "sign-1", "verify-1", "2026-02-24T00:00:00Z", "2029-02-24T00:00:00Z"
+            ),
+            *_saml_cert_pair(
+                "inactive-cert",
+                "sign-2",
+                "verify-2",
+                "2023-07-25T00:00:00Z",
+                "2026-07-25T00:00:00Z",
+            ),
+            *_saml_cert_pair(
+                "expired-cert", "sign-3", "verify-3", "2022-10-22T00:00:00Z", "2025-10-22T00:00:00Z"
+            ),
+        ],
+    }
+
+    creds = list(
+        extract_credentials(
+            sp, include_secrets=False, include_certificates=True, object_kind="service_principal"
+        )
+    )
+
+    assert len(creds) == 1
+    assert creds[0].key_id == "sign-1"
+    assert creds[0].end_datetime.isoformat() == "2029-02-24T00:00:00+00:00"
+
+
+def test_extract_credentials_skips_password_credentials_mirroring_saml_certs():
+    # Real tenant behavior: a service principal with SAML SSO configured
+    # also mirrors each signing certificate's metadata into
+    # passwordCredentials (same keyId, but no real secret value) — without
+    # filtering, that means every certificate gets double-counted, and the
+    # inactive/expired ones (which keyCredentials-side filtering already
+    # excludes) reappear via this second path.
+    sp = {
+        "id": "sp-1",
+        "appId": "app-1",
+        "displayName": "Contoso SSO App",
+        "keyCredentials": [
+            *_saml_cert_pair(
+                "active-cert", "sign-1", "verify-1", "2026-02-24T00:00:00Z", "2029-02-24T00:00:00Z"
+            ),
+            *_saml_cert_pair(
+                "inactive-cert",
+                "sign-2",
+                "verify-2",
+                "2023-07-25T00:00:00Z",
+                "2026-07-25T00:00:00Z",
+            ),
+        ],
+        "passwordCredentials": [
+            {
+                "keyId": "sign-1",
+                "displayName": "CN=mirrored",
+                "startDateTime": "2026-02-24T00:00:00Z",
+                "endDateTime": "2029-02-24T00:00:00Z",
+                "hint": None,
+                "secretText": None,
+            },
+            {
+                "keyId": "sign-2",
+                "displayName": "CN=mirrored",
+                "startDateTime": "2023-07-25T00:00:00Z",
+                "endDateTime": "2026-07-25T00:00:00Z",
+                "hint": None,
+                "secretText": None,
+            },
+            {
+                "keyId": "real-secret",
+                "displayName": "an actual client secret",
+                "startDateTime": "2024-01-01T00:00:00Z",
+                "endDateTime": "2026-01-01T00:00:00Z",
+                "hint": "abc",
+                "secretText": None,
+            },
+        ],
+    }
+
+    creds = list(
+        extract_credentials(
+            sp, include_secrets=True, include_certificates=True, object_kind="service_principal"
+        )
+    )
+
+    key_ids = sorted(c.key_id for c in creds)
+    assert key_ids == ["real-secret", "sign-1"]
+
+
+def test_extract_credentials_does_not_collapse_application_key_credentials():
+    # The Sign/Verify collapsing is specific to service principals; a plain
+    # App Registration certificate should never be filtered this way.
+    app = {
+        "id": "obj-1",
+        "appId": "app-1",
+        "displayName": "My App",
+        "keyCredentials": [
+            {
+                "keyId": "cert-1",
+                "displayName": "cert one",
+                "startDateTime": "2024-01-01T00:00:00Z",
+                "endDateTime": "2026-01-01T00:00:00Z",
+            },
+            {
+                "keyId": "cert-2",
+                "displayName": "cert two",
+                "startDateTime": "2024-01-01T00:00:00Z",
+                "endDateTime": "2027-01-01T00:00:00Z",
+            },
+        ],
+    }
+
+    creds = list(extract_credentials(app, include_secrets=False, include_certificates=True))
+
+    assert len(creds) == 2

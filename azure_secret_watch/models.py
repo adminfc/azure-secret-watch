@@ -42,7 +42,8 @@ class Credential:
         if self.object_kind == "service_principal":
             return (
                 "https://portal.azure.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/"
-                f"~/SingleSignOn/appId/{self.app_id}"
+                f"~/SignOn/objectId/{self.app_object_id}/appId/{self.app_id}/"
+                "preferredSingleSignOnMode/saml/servicePrincipalType/Application/fromNav/"
             )
         return (
             "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/"

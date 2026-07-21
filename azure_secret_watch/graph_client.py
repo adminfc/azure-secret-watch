@@ -109,6 +109,34 @@ def _parse_datetime(value: str) -> datetime:
     return dt
 
 
+def _active_signing_certificate(key_credentials: list[dict]) -> list[dict]:
+    """A service principal's keyCredentials lists every SAML signing
+    certificate it has ever had — each one duplicated once per usage
+    ("Sign" and "Verify") — but only one of them is actually in use at a
+    time; the rest are historical (rolled-over or already-expired) and not
+    worth alerting on.
+
+    Graph exposes which one is active via the service principal's
+    ``preferredTokenSigningKeyThumbprint``, but that's a SHA-1 thumbprint of
+    the certificate bytes, and ``keyCredentials[].customKeyIdentifier`` is a
+    SHA-256 identifier instead — there's no way to cross-reference the two
+    without the actual certificate (which Graph never returns). Instead,
+    collapse the Sign/Verify duplicates for each physical certificate
+    (grouped by customKeyIdentifier) and keep only the one with the
+    furthest-future endDateTime: rotating to a new certificate always means
+    creating one with a later expiry than whatever was previously active, so
+    in every normal rotation workflow that's also the currently-active one.
+    """
+    by_identifier: dict[str, dict] = {}
+    for cred in key_credentials:
+        identifier = cred.get("customKeyIdentifier") or cred["keyId"]
+        if identifier not in by_identifier or cred.get("usage") == "Sign":
+            by_identifier[identifier] = cred
+    if not by_identifier:
+        return []
+    return [max(by_identifier.values(), key=lambda cred: cred["endDateTime"])]
+
+
 def extract_credentials(
     app: dict,
     include_secrets: bool,
@@ -118,9 +146,20 @@ def extract_credentials(
     app_object_id = app["id"]
     app_id = app["appId"]
     app_display_name = app.get("displayName") or "(unnamed application)"
+    all_key_credentials = app.get("keyCredentials") or []
 
     if include_secrets:
+        # A service principal with SAML SSO configured mirrors each signing
+        # certificate's metadata into passwordCredentials too (same keyId,
+        # but secretText/hint are always null - there's no actual secret
+        # value behind it). Skip those here so they're not double-counted
+        # alongside the same certificate already handled via keyCredentials
+        # below; any password credential that doesn't match a certificate is
+        # a real secret and still gets reported normally.
+        cert_key_ids = {cred["keyId"] for cred in all_key_credentials}
         for cred in app.get("passwordCredentials") or []:
+            if object_kind == "service_principal" and cred["keyId"] in cert_key_ids:
+                continue
             yield Credential(
                 key_id=cred["keyId"],
                 credential_type=CredentialType.SECRET,
@@ -134,7 +173,10 @@ def extract_credentials(
             )
 
     if include_certificates:
-        for cred in app.get("keyCredentials") or []:
+        key_credentials = all_key_credentials
+        if object_kind == "service_principal":
+            key_credentials = _active_signing_certificate(key_credentials)
+        for cred in key_credentials:
             yield Credential(
                 key_id=cred["keyId"],
                 credential_type=CredentialType.CERTIFICATE,

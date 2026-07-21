@@ -71,9 +71,24 @@ class GraphClient:
         }
         yield from self._paged(url, params)
 
-    def get_owner_emails(self, app_object_id: str) -> list[str]:
-        """Best-effort lookup of an application's owner email addresses."""
-        url = f"{GRAPH_BASE_URL}/applications/{app_object_id}/owners"
+    def iter_service_principals(self) -> Iterator[dict]:
+        """Yield raw service principal (Enterprise Application) objects.
+
+        This includes every service principal in the tenant, not just ones
+        with credentials of interest — most (first-party Microsoft ones in
+        particular) have empty passwordCredentials/keyCredentials and are
+        filtered out downstream in extract_credentials.
+        """
+        url = f"{GRAPH_BASE_URL}/servicePrincipals"
+        params = {
+            "$select": "id,appId,displayName,passwordCredentials,keyCredentials",
+            "$top": str(self._page_size),
+        }
+        yield from self._paged(url, params)
+
+    def get_owner_emails(self, object_id: str, resource: str = "applications") -> list[str]:
+        """Best-effort lookup of an application/service principal's owner emails."""
+        url = f"{GRAPH_BASE_URL}/{resource}/{object_id}/owners"
         params = {"$select": "mail,userPrincipalName"}
         emails: list[str] = []
         try:
@@ -82,7 +97,7 @@ class GraphClient:
                 if email:
                     emails.append(email)
         except requests.HTTPError as exc:
-            logger.warning("Could not fetch owners for application %s: %s", app_object_id, exc)
+            logger.warning("Could not fetch owners for %s %s: %s", resource, object_id, exc)
         return emails
 
 
@@ -95,7 +110,10 @@ def _parse_datetime(value: str) -> datetime:
 
 
 def extract_credentials(
-    app: dict, include_secrets: bool, include_certificates: bool
+    app: dict,
+    include_secrets: bool,
+    include_certificates: bool,
+    object_kind: str = "application",
 ) -> Iterable[Credential]:
     app_object_id = app["id"]
     app_id = app["appId"]
@@ -112,6 +130,7 @@ def extract_credentials(
                 app_object_id=app_object_id,
                 app_id=app_id,
                 app_display_name=app_display_name,
+                object_kind=object_kind,
             )
 
     if include_certificates:
@@ -125,4 +144,5 @@ def extract_credentials(
                 app_object_id=app_object_id,
                 app_id=app_id,
                 app_display_name=app_display_name,
+                object_kind=object_kind,
             )

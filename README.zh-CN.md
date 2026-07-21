@@ -121,7 +121,9 @@ docker compose -f docker-compose.once.yml run --rm azure-secret-watch
 
 1. 在 Microsoft Entra ID 里为本工具注册一个专用的 App Registration。
 2. 授予它 **application** 权限 `Application.Read.All`（Microsoft Graph），
-   然后点击 **Grant admin consent**。
+   然后点击 **Grant admin consent**。这一个权限就同时覆盖了读取 App
+   Registration 和 Enterprise Application（service principal）——下面的
+   `INCLUDE_ENTERPRISE_APPS` 不需要额外单独授权。
 3. 如果你打算启用下面的 `NOTIFY_OWNERS`，还需要额外授予 `User.Read.All`
    以便解析所有者邮箱。
 
@@ -155,6 +157,7 @@ AZURE_CLIENT_CERTIFICATE_PASSWORD=
 WARNING_THRESHOLDS_DAYS=30,14,7,1
 INCLUDE_SECRETS=true
 INCLUDE_CERTIFICATES=true
+INCLUDE_ENTERPRISE_APPS=true
 EXPIRED_REMINDER_INTERVAL_DAYS=7
 NOTIFY_OWNERS=false
 ```
@@ -162,6 +165,14 @@ NOTIFY_OWNERS=false
 - `WARNING_THRESHOLDS_DAYS` —— 逗号分隔的"到期前多少天"提醒档位；后续也可以
   在 Monitoring 页面直接修改。
 - `INCLUDE_SECRETS` / `INCLUDE_CERTIFICATES` —— 扫描哪些凭据类型。
+- `INCLUDE_ENTERPRISE_APPS` —— 同时扫描 Enterprise Application（service
+  principal）上即将到期的 SAML SSO 签名证书。这是跟 App Registration 完全
+  不同的另一种对象——很多 SAML SSO 应用根本没有对应的 App Registration，
+  只有一个 service principal，很容易被漏掉。面板里这类记录会显示"Source:
+  Enterprise app"标签，因为续期方式也不一样（要去 Enterprise Applications →
+  Single sign-on → SAML Certificates，而不是"Certificates & secrets"）。
+  用的还是同一个 `Application.Read.All` 权限，但需要遍历租户里所有的
+  service principal（包括微软自带的那些），所以会多一些 Graph API 调用。
 - `EXPIRED_REMINDER_INTERVAL_DAYS` —— 已经过期、还没轮换的凭据，间隔多少天
   重新提醒一次。
 - `NOTIFY_OWNERS` —— 通过 `/applications/{id}/owners` 查询每个应用的所有者，

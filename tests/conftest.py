@@ -22,6 +22,7 @@ def make_credential(
     app_id: str = "app-id-1",
     app_object_id: str = "obj-1",
     app_display_name: str = "Test App",
+    object_kind: str = "application",
 ) -> Credential:
     now = datetime.now(timezone.utc)
     return Credential(
@@ -33,6 +34,7 @@ def make_credential(
         app_object_id=app_object_id,
         app_id=app_id,
         app_display_name=app_display_name,
+        object_kind=object_kind,
     )
 
 
@@ -47,6 +49,7 @@ def make_config(tmp_path, **overrides) -> Config:
         warning_thresholds_days=[30, 14, 7, 1],
         include_secrets=True,
         include_certificates=True,
+        include_enterprise_apps=True,
         notify_owners=False,
         expired_reminder_interval_days=7,
         run_mode="loop",

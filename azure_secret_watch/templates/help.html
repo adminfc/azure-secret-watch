@@ -68,14 +68,14 @@
       <span class="channel-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
       <div>
         <div class="title">How do I authenticate with Azure AD? <span class="help-required">Required</span></div>
-        <div class="desc">Lets azure-secret-watch read App Registrations and their credential metadata via Microsoft Graph.</div>
+        <div class="desc">Lets azure-secret-watch read App Registrations, Enterprise Applications, and their credential metadata via Microsoft Graph.</div>
       </div>
       <svg class="icon chev"><use href="#i-chevron"/></svg>
     </summary>
     <div class="help-body">
       <ol>
         <li>Register a dedicated App Registration for this watcher in Microsoft Entra ID.</li>
-        <li>Grant it the <strong>application</strong> permission <code>Application.Read.All</code> (Microsoft Graph), then click <strong>Grant admin consent</strong>.</li>
+        <li>Grant it the <strong>application</strong> permission <code>Application.Read.All</code> (Microsoft Graph), then click <strong>Grant admin consent</strong>. This one permission covers reading both App Registrations and Enterprise Applications (service principals) — no separate grant needed for <code>INCLUDE_ENTERPRISE_APPS</code> below.</li>
         <li>If you plan to enable <code>NOTIFY_OWNERS</code> below, also grant <code>User.Read.All</code> so owner emails can be resolved.</li>
       </ol>
       <p>This tool only ever issues Graph <code>GET</code> requests — it cannot read secret values (Graph never returns them after creation) and cannot modify anything.</p>
@@ -104,11 +104,13 @@ AZURE_CLIENT_CERTIFICATE_PASSWORD=</pre>
       <pre>WARNING_THRESHOLDS_DAYS=30,14,7,1
 INCLUDE_SECRETS=true
 INCLUDE_CERTIFICATES=true
+INCLUDE_ENTERPRISE_APPS=true
 EXPIRED_REMINDER_INTERVAL_DAYS=7
 NOTIFY_OWNERS=false</pre>
       <ul>
         <li><code>WARNING_THRESHOLDS_DAYS</code> — comma-separated "days before expiry" that trigger an alert; also editable later from <a href="/settings">Monitoring</a>.</li>
         <li><code>INCLUDE_SECRETS</code> / <code>INCLUDE_CERTIFICATES</code> — which credential types to scan.</li>
+        <li><code>INCLUDE_ENTERPRISE_APPS</code> — also scan Enterprise Applications (service principals) for expiring SAML SSO signing certificates. This is a completely separate object from App Registrations — many SAML SSO apps have no App Registration at all, only a service principal — and it's easy to miss otherwise. Rows from here show a "Source: Enterprise app" label, since renewing one works differently (Enterprise Applications → Single sign-on → SAML Certificates, not "Certificates &amp; secrets"). Uses the same <code>Application.Read.All</code> permission, but does enumerate every service principal in the tenant (including built-in Microsoft ones), so it adds some Graph API traffic.</li>
         <li><code>EXPIRED_REMINDER_INTERVAL_DAYS</code> — how often (in days) to re-notify about something that's still expired and hasn't been rotated.</li>
         <li><code>NOTIFY_OWNERS</code> — look up each app's owners and show/include them in the dashboard and notifications (requires the <code>User.Read.All</code> permission above).</li>
       </ul>

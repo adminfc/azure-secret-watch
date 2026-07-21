@@ -690,3 +690,56 @@ def test_help_link_present_in_nav(tmp_path):
     resp = client.get("/")
 
     assert 'href="/help"' in resp.get_data(as_text=True)
+
+
+def test_dashboard_labels_enterprise_app_credentials_by_source(tmp_path):
+    config = make_config(tmp_path)
+    write_json(
+        config.inventory_file_path,
+        {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "credentials": [
+                {
+                    "app_display_name": "Billing Service",
+                    "app_id": "app-1",
+                    "app_object_id": "obj-1",
+                    "credential_type": "secret",
+                    "display_name": "prod secret",
+                    "key_id": "k1",
+                    "start_datetime": "2020-01-01T00:00:00+00:00",
+                    "end_datetime": "2026-01-05T00:00:00+00:00",
+                    "days_until_expiry": 3,
+                    "is_expired": False,
+                    "status": "warning",
+                    "portal_url": "https://portal.azure.com/x",
+                    "object_kind": "application",
+                },
+                {
+                    "app_display_name": "Newegg NAS",
+                    "app_id": "app-2",
+                    "app_object_id": "sp-obj-2",
+                    "credential_type": "certificate",
+                    "display_name": "SAML signing certificate",
+                    "key_id": "k2",
+                    "start_datetime": "2020-01-01T00:00:00+00:00",
+                    "end_datetime": "2026-01-06T00:00:00+00:00",
+                    "days_until_expiry": 4,
+                    "is_expired": False,
+                    "status": "warning",
+                    "portal_url": "https://portal.azure.com/y",
+                    "object_kind": "service_principal",
+                },
+            ],
+        },
+    )
+    client = web.create_app(config).test_client()
+
+    body = client.get("/?view=all").get_data(as_text=True)
+
+    assert 'data-source="app registration"' in body
+    assert 'data-source="enterprise app"' in body
+    assert ">App registration<" in body
+    assert ">Enterprise app<" in body
+    # The default Applications view's attention rows also carry the label.
+    attention_body = client.get("/").get_data(as_text=True)
+    assert "Enterprise app" in attention_body

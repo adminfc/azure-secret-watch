@@ -39,42 +39,55 @@ def scan(
     include_certificates: bool,
     expired_reminder_interval_days: int,
     notify_owners: bool,
+    include_enterprise_apps: bool,
 ) -> ScanResult:
     all_credentials: list[Credential] = []
     alerts: list[Alert] = []
     owners_by_app: dict[str, list[str]] = {}
     seen_key_ids: set[str] = set()
-    app_count = 0
 
-    def owners_for(app_object_id: str) -> list[str]:
-        if app_object_id not in owners_by_app:
-            owners_by_app[app_object_id] = graph_client.get_owner_emails(app_object_id)
-        return owners_by_app[app_object_id]
+    def owners_for(object_id: str, resource: str) -> list[str]:
+        if object_id not in owners_by_app:
+            owners_by_app[object_id] = graph_client.get_owner_emails(object_id, resource)
+        return owners_by_app[object_id]
 
-    for app in graph_client.iter_applications():
-        app_count += 1
-        for credential in extract_credentials(app, include_secrets, include_certificates):
-            all_credentials.append(credential)
-            seen_key_ids.add(credential.key_id)
-            if notify_owners:
-                owners_for(credential.app_object_id)
-
-            bucket = bucket_for(credential, warning_thresholds_days)
-            if bucket is None:
-                continue
-            if not state_store.should_notify(
-                credential.key_id, bucket, expired_reminder_interval_days
+    def process(objects, object_kind: str, resource: str) -> int:
+        count = 0
+        for obj in objects:
+            count += 1
+            for credential in extract_credentials(
+                obj, include_secrets, include_certificates, object_kind=object_kind
             ):
-                continue
+                all_credentials.append(credential)
+                seen_key_ids.add(credential.key_id)
+                if notify_owners:
+                    owners_for(credential.app_object_id, resource)
 
-            owners = owners_for(credential.app_object_id) if notify_owners else []
-            alerts.append(Alert(credential=credential, bucket=bucket, owners=owners))
+                bucket = bucket_for(credential, warning_thresholds_days)
+                if bucket is None:
+                    continue
+                if not state_store.should_notify(
+                    credential.key_id, bucket, expired_reminder_interval_days
+                ):
+                    continue
+
+                owners = owners_for(credential.app_object_id, resource) if notify_owners else []
+                alerts.append(Alert(credential=credential, bucket=bucket, owners=owners))
+        return count
+
+    sp_count = 0
+    app_count = process(graph_client.iter_applications(), "application", "applications")
+    if include_enterprise_apps:
+        sp_count = process(
+            graph_client.iter_service_principals(), "service_principal", "servicePrincipals"
+        )
 
     removed = state_store.prune(seen_key_ids)
     logger.info(
-        "Scanned %d application(s), %d credential(s); %d alert(s) to send; "
-        "pruned %d stale state row(s)",
+        "Scanned %d application(s) and %d service principal(s), %d credential(s); "
+        "%d alert(s) to send; pruned %d stale state row(s)",
         app_count,
+        sp_count,
         len(all_credentials),
         len(alerts),
         removed,

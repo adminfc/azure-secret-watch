@@ -51,6 +51,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .attn-no-owner { font-style: italic; }
+  .attn-source { color: var(--accent-text); font-weight: 600; }
   .attn-when { font-size: 12.5px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
   .attn-when.expired { color: var(--danger-text); }
   .attn-when.warning { color: var(--warning-text); }
@@ -82,13 +83,14 @@
   tbody tr:last-child { border-bottom: none; }
   tbody tr:hover { background: var(--bg-page); }
   th.col-status, td.status-cell { width: 96px; }
+  th.col-source, td.source-cell { width: 150px; }
   th.col-type, td.type-cell { width: 90px; }
   th.col-expires, td.expires-cell { width: 118px; }
   th.col-days, td.days-cell { width: 132px; }
   th.col-actions, td.actions-cell { width: 76px; }
-  th.col-app, td.app-cell { width: 24%; }
-  th.col-cred, td.cred-cell { width: 16%; }
-  th.col-owners, td.owners-cell { width: 15%; }
+  th.col-app, td.app-cell { width: 20%; }
+  th.col-cred, td.cred-cell { width: 14%; }
+  th.col-owners, td.owners-cell { width: 13%; }
   td.app-cell { font-weight: 550; }
   td.cred-cell, td.type-cell { color: var(--text-secondary); }
   td.expires-cell, td.days-cell {
@@ -226,7 +228,9 @@
         <div class="attn-main">
           <div class="attn-title">{{ c.app_display_name }} <span class="attn-cred">— {{ c.display_name }}</span></div>
           <div class="attn-sub">
-            {{ 'Certificate' if c.credential_type == 'certificate' else 'Secret' }} · expires {{ c.end_datetime[:10] }}
+            {{ 'Certificate' if c.credential_type == 'certificate' else 'Secret' }}
+            {%- if c.object_kind == 'service_principal' %} · <span class="attn-source">Enterprise app</span>{% endif %}
+            · expires {{ c.end_datetime[:10] }}
             {%- if owners_enabled %} · {% if c.owners %}{{ c.owners | join(', ') }}{% else %}<span class="attn-no-owner">no owner</span>{% endif %}{% endif %}
           </div>
         </div>
@@ -294,6 +298,7 @@
         <tr>
           <th class="col-status">Status</th>
           <th class="sortable col-app truncate" data-key="app">Application <span class="sort-arrow">▲</span></th>
+          <th class="sortable col-source truncate" data-key="source">Source <span class="sort-arrow">▲</span></th>
           <th class="sortable col-type" data-key="type">Type <span class="sort-arrow">▲</span></th>
           <th class="sortable col-cred truncate" data-key="cred">Credential <span class="sort-arrow">▲</span></th>
           <th class="sortable col-expires" data-key="expires">Expires on <span class="sort-arrow">▲</span></th>
@@ -305,9 +310,11 @@
       <tbody>
         {% for c in credentials %}
         {% set owners_text = (c.owners or []) | join(', ') %}
+        {% set is_enterprise_app = c.object_kind == 'service_principal' %}
         <tr data-status="{{ c.status }}"
             data-search="{{ (c.app_display_name ~ ' ' ~ c.display_name ~ ' ' ~ owners_text) | lower }}"
             data-app="{{ c.app_display_name | lower }}"
+            data-source="{{ 'enterprise app' if is_enterprise_app else 'app registration' }}"
             data-type="{{ c.credential_type }}"
             data-cred="{{ c.display_name | lower }}"
             data-expires="{{ c.end_datetime[:10] }}"
@@ -315,6 +322,7 @@
             data-owners="{{ (c.owners or []) | join('; ') }}">
           <td class="status-cell"><span class="badge {{ c.status }}">{{ c.status }}</span></td>
           <td class="app-cell truncate" title="{{ c.app_display_name }}">{{ c.app_display_name }}</td>
+          <td class="source-cell truncate" title="{{ 'Enterprise app (SAML SSO cert)' if is_enterprise_app else 'App registration' }}">{{ 'Enterprise app' if is_enterprise_app else 'App registration' }}</td>
           <td class="type-cell">{{ 'Certificate' if c.credential_type == 'certificate' else 'Secret' }}</td>
           <td class="cred-cell truncate" title="{{ c.display_name }}">{{ c.display_name }}</td>
           <td class="expires-cell">{{ c.end_datetime[:10] }}</td>
@@ -509,7 +517,7 @@
 
   document.getElementById('export-csv').addEventListener('click', function () {
     var ownersEnabled = {{ owners_enabled | tojson }};
-    var header = ['status', 'application', 'type', 'credential', 'expires_on', 'days_until_expiry'];
+    var header = ['status', 'application', 'source', 'type', 'credential', 'expires_on', 'days_until_expiry'];
     if (ownersEnabled) header.push('owners');
     var lines = [header.join(',')];
     currentRows().filter(matches).forEach(function (r) {
@@ -519,6 +527,7 @@
         cells[1].textContent.trim(),
         cells[2].textContent.trim(),
         cells[3].textContent.trim(),
+        cells[4].textContent.trim(),
         r.dataset.expires,
         r.dataset.days
       ];

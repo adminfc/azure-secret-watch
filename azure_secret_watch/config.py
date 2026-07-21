@@ -119,6 +119,7 @@ class Config:
     warning_thresholds_days: list[int]
     include_secrets: bool
     include_certificates: bool
+    include_enterprise_apps: bool
     notify_owners: bool
     expired_reminder_interval_days: int
     run_mode: str
@@ -192,6 +193,7 @@ class Config:
             warning_thresholds_days=_thresholds("WARNING_THRESHOLDS_DAYS", "30,14,7,1"),
             include_secrets=_bool("INCLUDE_SECRETS", True),
             include_certificates=_bool("INCLUDE_CERTIFICATES", True),
+            include_enterprise_apps=_bool("INCLUDE_ENTERPRISE_APPS", True),
             notify_owners=_bool("NOTIFY_OWNERS", False),
             expired_reminder_interval_days=_int("EXPIRED_REMINDER_INTERVAL_DAYS", 7),
             run_mode=os.getenv("RUN_MODE", "loop").strip().lower(),

@@ -59,6 +59,7 @@ def _credential_to_dict(
         "is_expired": credential.is_expired,
         "status": credential_status(credential, warning_thresholds_days),
         "portal_url": credential.portal_url,
+        "object_kind": credential.object_kind,
         "owners": owners,
     }
 
@@ -137,6 +138,7 @@ def run_once(config: Config) -> int:
             include_certificates=config.include_certificates,
             expired_reminder_interval_days=config.expired_reminder_interval_days,
             notify_owners=config.notify_owners,
+            include_enterprise_apps=config.include_enterprise_apps,
         )
 
         for notifier in notifiers:

@@ -142,7 +142,9 @@ actually works before relying on it.
 
 1. Register a dedicated App Registration for this watcher in Microsoft Entra ID.
 2. Grant it the **application** permission `Application.Read.All` (Microsoft
-   Graph), then click **Grant admin consent**.
+   Graph), then click **Grant admin consent**. This one permission covers
+   reading both App Registrations and Enterprise Applications (service
+   principals) — no separate grant needed for `INCLUDE_ENTERPRISE_APPS` below.
 3. If you plan to enable `NOTIFY_OWNERS` below, also grant `User.Read.All` so
    owner emails can be resolved.
 
@@ -178,6 +180,7 @@ the `./certs` volume in `docker-compose.yml` — instead of setting
 WARNING_THRESHOLDS_DAYS=30,14,7,1
 INCLUDE_SECRETS=true
 INCLUDE_CERTIFICATES=true
+INCLUDE_ENTERPRISE_APPS=true
 EXPIRED_REMINDER_INTERVAL_DAYS=7
 NOTIFY_OWNERS=false
 ```
@@ -185,6 +188,16 @@ NOTIFY_OWNERS=false
 - `WARNING_THRESHOLDS_DAYS` — comma-separated "days before expiry" that
   trigger an alert; also editable later from the Monitoring page.
 - `INCLUDE_SECRETS` / `INCLUDE_CERTIFICATES` — which credential types to scan.
+- `INCLUDE_ENTERPRISE_APPS` — also scan Enterprise Applications (service
+  principals) for expiring SAML SSO signing certificates. This is a
+  completely separate object from App Registrations — many SAML SSO apps
+  have no App Registration at all, only a service principal — and it's easy
+  to miss otherwise. These rows show a "Source: Enterprise app" label in the
+  dashboard, since renewing one works differently (Enterprise Applications →
+  Single sign-on → SAML Certificates, not "Certificates & secrets"). Uses the
+  same `Application.Read.All` permission, but does enumerate every service
+  principal in the tenant (including built-in Microsoft ones), so it adds
+  some Graph API traffic.
 - `EXPIRED_REMINDER_INTERVAL_DAYS` — how often (in days) to re-notify about
   something that's still expired and hasn't been rotated.
 - `NOTIFY_OWNERS` — look up each app's owners via

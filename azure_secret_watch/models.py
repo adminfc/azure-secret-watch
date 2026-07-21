@@ -21,6 +21,10 @@ class Credential:
     app_object_id: str
     app_id: str
     app_display_name: str
+    # "application" (an App Registration's own secret/certificate) or
+    # "service_principal" (an Enterprise Application's SAML signing
+    # certificate, a completely separate object with its own renewal blade).
+    object_kind: str = "application"
 
     @property
     def days_until_expiry(self) -> int:
@@ -35,6 +39,11 @@ class Credential:
 
     @property
     def portal_url(self) -> str:
+        if self.object_kind == "service_principal":
+            return (
+                "https://portal.azure.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/"
+                f"~/SingleSignOn/appId/{self.app_id}"
+            )
         return (
             "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/"
             f"ApplicationMenuBlade/~/Credentials/appId/{self.app_id}"
